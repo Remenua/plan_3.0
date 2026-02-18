@@ -63,7 +63,7 @@ const ui = {
 type PeriodKey = string;
 type PeriodColumn = { key: PeriodKey; label: string };
 type TableStep = 'day' | 'week' | 'month';
-type PeriodPreset = '7' | '14' | '30' | '4' | '8' | '12' | '3' | '6';
+type QuickPeriodPreset = '7d' | '14d' | '30d' | '4w' | '8w' | '12w' | '3m' | '6m' | '12m';
 
 const MONTH_COLUMNS: PeriodColumn[] = [
   { key: 'Jan', label: 'Янв' },
@@ -86,29 +86,79 @@ const STEP_OPTIONS: { key: TableStep; label: string }[] = [
   { key: 'month', label: 'Месяц' },
 ];
 
-const PERIOD_OPTIONS_BY_STEP: Record<TableStep, { key: PeriodPreset; label: string }[]> = {
+const QUICK_PERIOD_OPTIONS_BY_STEP: Record<TableStep, { key: QuickPeriodPreset; label: string; amount: number }[]> = {
   day: [
-    { key: '7', label: '7 дней' },
-    { key: '14', label: '14 дней' },
-    { key: '30', label: '30 дней' },
+    { key: '7d', label: '7 дней', amount: 7 },
+    { key: '14d', label: '14 дней', amount: 14 },
+    { key: '30d', label: '30 дней', amount: 30 },
   ],
   week: [
-    { key: '4', label: '4 недели' },
-    { key: '8', label: '8 недель' },
-    { key: '12', label: '12 недель' },
+    { key: '4w', label: '4 недели', amount: 4 },
+    { key: '8w', label: '8 недель', amount: 8 },
+    { key: '12w', label: '12 недель', amount: 12 },
   ],
   month: [
-    { key: '3', label: '3 месяца' },
-    { key: '6', label: '6 месяцев' },
-    { key: '12', label: '12 месяцев' },
+    { key: '3m', label: '3 месяца', amount: 3 },
+    { key: '6m', label: '6 месяцев', amount: 6 },
+    { key: '12m', label: '12 месяцев', amount: 12 },
   ],
 };
 
-function buildPeriodColumns(step: TableStep, preset: PeriodPreset): PeriodColumn[] {
-  const n = Math.max(1, Number(preset));
-  if (step === 'day') return Array.from({ length: n }, (_, i) => ({ key: `D${i + 1}`, label: `Д${i + 1}` }));
-  if (step === 'week') return Array.from({ length: n }, (_, i) => ({ key: `W${i + 1}`, label: `Н${i + 1}` }));
-  return MONTH_COLUMNS.slice(0, n);
+function addDays(base: Date, days: number): Date {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function addMonths(base: Date, months: number): Date {
+  const d = new Date(base);
+  d.setMonth(d.getMonth() + months);
+  return d;
+}
+
+function toISO(date: Date): string {
+  const y = date.getFullYear();
+  const m = `${date.getMonth() + 1}`.padStart(2, '0');
+  const d = `${date.getDate()}`.padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function parseISO(iso: string): Date {
+  return new Date(`${iso}T00:00:00`);
+}
+
+function monthLabel(date: Date): string {
+  return date.toLocaleString('ru-RU', { month: 'short' }).replace('.', '');
+}
+
+function buildPeriodColumns(step: TableStep, fromISO: string, toISOValue: string): PeriodColumn[] {
+  const from = parseISO(fromISO);
+  const to = parseISO(toISOValue);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return MONTH_COLUMNS;
+
+  const cols: PeriodColumn[] = [];
+  if (step === 'day') {
+    let i = 0;
+    for (let d = new Date(from); d <= to && i < 370; d = addDays(d, 1), i += 1) {
+      cols.push({ key: toISO(d), label: `${d.getDate()}.${d.getMonth() + 1}` });
+    }
+    return cols;
+  }
+
+  if (step === 'week') {
+    let idx = 1;
+    for (let d = new Date(from); d <= to && idx <= 104; d = addDays(d, 7), idx += 1) {
+      cols.push({ key: toISO(d), label: `Н${idx}` });
+    }
+    return cols;
+  }
+
+  let idx = 0;
+  for (let d = new Date(from.getFullYear(), from.getMonth(), 1); d <= to && idx < 24; d = addMonths(d, 1), idx += 1) {
+    const label = `${monthLabel(d).charAt(0).toUpperCase()}${monthLabel(d).slice(1)}`;
+    cols.push({ key: `M-${d.getFullYear()}-${d.getMonth() + 1}`, label });
+  }
+  return cols.length ? cols : MONTH_COLUMNS;
 }
 
 type AnalyticKey = 'Проект' | 'Номенклатура' | 'Организация' | 'ЦФО';
@@ -400,8 +450,10 @@ function uniqAnalytics(list: AnalyticKey[]): AnalyticKey[] {
 export default function PlanningPrototype() {
   const [view, setView] = useState<View>('list');
   const [tableStep, setTableStep] = useState<TableStep>('month');
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('12');
-  const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodPreset), [tableStep, periodPreset]);
+  const [quickPreset, setQuickPreset] = useState<QuickPeriodPreset>('12m');
+  const [periodFrom, setPeriodFrom] = useState<string>('2026-01-01');
+  const [periodTo, setPeriodTo] = useState<string>('2026-12-31');
+  const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodFrom, periodTo), [tableStep, periodFrom, periodTo]);
 
   const [plans, setPlans] = useState<Plan[]>([
     {
@@ -484,6 +536,31 @@ export default function PlanningPrototype() {
   const closeCard = () => {
     setView('list');
     setLinkInput('');
+  };
+
+  const applyQuickPreset = (step: TableStep, preset: QuickPeriodPreset) => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    if (step === 'day') {
+      const amount = QUICK_PERIOD_OPTIONS_BY_STEP.day.find((x) => x.key === preset)?.amount ?? 30;
+      setPeriodFrom(toISO(start));
+      setPeriodTo(toISO(addDays(start, amount - 1)));
+      return;
+    }
+
+    if (step === 'week') {
+      const amount = QUICK_PERIOD_OPTIONS_BY_STEP.week.find((x) => x.key === preset)?.amount ?? 12;
+      setPeriodFrom(toISO(start));
+      setPeriodTo(toISO(addDays(start, amount * 7 - 1)));
+      return;
+    }
+
+    const amount = QUICK_PERIOD_OPTIONS_BY_STEP.month.find((x) => x.key === preset)?.amount ?? 12;
+    const monthStart = new Date(start.getFullYear(), start.getMonth(), 1);
+    const monthEndExclusive = addMonths(monthStart, amount);
+    setPeriodFrom(toISO(monthStart));
+    setPeriodTo(toISO(addDays(monthEndExclusive, -1)));
   };
 
   const openValues = () => {
@@ -671,7 +748,7 @@ export default function PlanningPrototype() {
     for (const k of current.analytics ?? []) {
       const map: Record<string, boolean> = {};
       for (const v of ANALYTIC_VALUES[k]) {
-        map[v] = current.valuesMode === 'selected' ? !!current.selectedValues[k]?.includes(v) : false;
+        map[v] = current.valuesMode === 'all' ? true : !!current.selectedValues[k]?.includes(v);
       }
       selectedValuesMap[k] = map;
     }
@@ -681,7 +758,7 @@ export default function PlanningPrototype() {
       target,
       applyTo: 'only',
       analytics: [...(current.analytics ?? [])],
-      valuesMode: current.valuesMode ?? 'all',
+      valuesMode: 'selected',
       selectedValues: selectedValuesMap,
     });
   };
@@ -697,7 +774,7 @@ export default function PlanningPrototype() {
       const selectedValues = { ...prev.selectedValues };
       if (checked && !selectedValues[k]) {
         const m: Record<string, boolean> = {};
-        for (const v of ANALYTIC_VALUES[k]) m[v] = false;
+        for (const v of ANALYTIC_VALUES[k]) m[v] = true;
         selectedValues[k] = m;
       }
       if (!checked) delete selectedValues[k];
@@ -731,18 +808,13 @@ export default function PlanningPrototype() {
     const analytics = [...bdg.analytics];
     if (!analytics.length) return defaultBreakdown();
 
-    if (bdg.valuesMode === 'all') {
-      const selectedValues: Partial<Record<AnalyticKey, string[]>> = {};
-      for (const k of analytics) selectedValues[k] = ANALYTIC_VALUES[k].slice(0, 5);
-      return { analytics, valuesMode: 'all', selectedValues };
-    }
-
     const selectedValues: Partial<Record<AnalyticKey, string[]>> = {};
     for (const k of analytics) {
       const map = bdg.selectedValues[k] ?? {};
-      selectedValues[k] = Object.entries(map)
+      const picked = Object.entries(map)
         .filter(([, v]) => v)
         .map(([kk]) => kk);
+      selectedValues[k] = picked.length ? picked : ANALYTIC_VALUES[k];
     }
 
     return { analytics, valuesMode: 'selected', selectedValues };
@@ -1001,12 +1073,17 @@ export default function PlanningPrototype() {
               {isSplit ? (
                 <div className="text-right text-gray-400 pr-2">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
               ) : (
-                <Input
-                  value={ln.values[p.key]}
-                  onChange={(e) => setCell(section.id, ln.id, p.key, e.target.value)}
-                  className="h-9 rounded-md"
-                  inputMode="decimal"
-                />
+                <button
+                  type="button"
+                  className="w-full h-8 rounded-md border border-gray-200 bg-white px-2 text-right text-sm hover:border-amber-300 hover:bg-amber-50"
+                  onClick={() => {
+                    const next = window.prompt('Введите значение', ln.values[p.key] ?? '');
+                    if (next === null) return;
+                    setCell(section.id, ln.id, p.key, next.trim());
+                  }}
+                >
+                  {ln.values[p.key] || '—'}
+                </button>
               )}
             </td>
           ))}
@@ -1027,12 +1104,17 @@ export default function PlanningPrototype() {
 
                 {periodColumns.map((p) => (
                   <td key={p.key} className="p-2">
-                    <Input
-                      value={c.values[p.key]}
-                      onChange={(e) => setComboCell(section.id, ln.id, c.id, p.key, e.target.value)}
-                      className="h-9 rounded-md"
-                      inputMode="decimal"
-                    />
+                    <button
+                      type="button"
+                      className="w-full h-8 rounded-md border border-gray-200 bg-white px-2 text-right text-sm hover:border-amber-300 hover:bg-amber-50"
+                      onClick={() => {
+                        const next = window.prompt('Введите значение', c.values[p.key] ?? '');
+                        if (next === null) return;
+                        setComboCell(section.id, ln.id, c.id, p.key, next.trim());
+                      }}
+                    >
+                      {c.values[p.key] || '—'}
+                    </button>
                   </td>
                 ))}
 
@@ -1259,7 +1341,7 @@ export default function PlanningPrototype() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-2xl font-semibold">{selectedPlan?.report ?? 'ПиУ'}</div>
-                    <div className="text-sm text-gray-500 mt-1">Заполняйте значения по статьям, настраивайте аналитику через кнопку «Аналитики», добавляйте нужные статьи из панели справа. Итоги считаются автоматически.</div>
+                    <div className="text-sm text-gray-500 mt-1">Выберите шаг и период, затем кликайте по ячейкам таблицы для ввода значений. Разрезы задаются через «Аналитики», а итоговые суммы пересчитываются автоматически.</div>
                   </div>
                   <Button type="button" className={ui.btnSecondary} onClick={() => setView('card')}>
                     ← Назад
@@ -1271,41 +1353,59 @@ export default function PlanningPrototype() {
                   <Pill text={formatBreakdownLabel(planBreakdown)} onClick={() => openBreakdownPanel({ scope: 'План' })} title="Настроить аналитики (разрезы) плана" />
                 </div>
 
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <div className="text-sm text-gray-600">Шаг:</div>
-                  <div className="flex gap-2">
-                    {STEP_OPTIONS.map((opt) => (
-                      <Button
-                        key={opt.key}
-                        type="button"
-                        className={tableStep === opt.key ? ui.btnPrimary : ui.btnSecondary}
-                        onClick={() => {
-                          setTableStep(opt.key);
-                          setPeriodPreset(PERIOD_OPTIONS_BY_STEP[opt.key][0].key);
-                        }}
-                      >
-                        {opt.label}
-                      </Button>
-                    ))}
+                <div className="mt-3 rounded-xl border p-3 bg-gray-50 space-y-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="text-sm text-gray-600">Шаг таблицы:</div>
+                    <div className="inline-flex rounded-lg border bg-white p-1">
+                      {STEP_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                            tableStep === opt.key ? 'bg-amber-400 text-gray-900' : 'text-gray-700 hover:bg-gray-100'
+                          }`}
+                          onClick={() => {
+                            setTableStep(opt.key);
+                            const nextPreset = QUICK_PERIOD_OPTIONS_BY_STEP[opt.key][0].key;
+                            setQuickPreset(nextPreset);
+                            applyQuickPreset(opt.key, nextPreset);
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-sm text-gray-600 ml-2">Быстрый выбор:</div>
+                    <div className="flex flex-wrap gap-2">
+                      {QUICK_PERIOD_OPTIONS_BY_STEP[tableStep].map((opt) => (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
+                            quickPreset === opt.key ? 'bg-amber-100 border-amber-300 text-gray-900' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-100'
+                          }`}
+                          onClick={() => {
+                            setQuickPreset(opt.key);
+                            applyQuickPreset(tableStep, opt.key);
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="text-sm text-gray-600 ml-2">Период:</div>
-                  <div className="flex gap-2">
-                    {PERIOD_OPTIONS_BY_STEP[tableStep].map((opt) => (
-                      <Button
-                        key={opt.key}
-                        type="button"
-                        className={periodPreset === opt.key ? ui.btnPrimary : ui.btnSecondary}
-                        onClick={() => setPeriodPreset(opt.key)}
-                      >
-                        {opt.label}
-                      </Button>
-                    ))}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="text-sm text-gray-600">Период (календарь):</div>
+                    <Input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="w-[170px] h-9" />
+                    <span className="text-gray-400">—</span>
+                    <Input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="w-[170px] h-9" />
                   </div>
                 </div>
 
                 <div className="mt-4 overflow-x-auto border rounded-lg">
-                  <table className="min-w-[1180px] w-full text-xs">
+                  <table className="min-w-[1400px] w-full text-sm">
                     <thead>
                       <tr className="border-b bg-gray-50">
                         <th className="p-2 text-left min-w-[240px]">Статья</th>
@@ -1332,7 +1432,7 @@ export default function PlanningPrototype() {
 
                           {section.isOpen && section.lines.length === 0 && !(selectedPlan?.report === 'ПиУ' && section.name === 'Чистая прибыль') ? (
                             <tr className="border-b">
-                              <td className="p-2 pl-8 text-xs text-gray-400" colSpan={periodColumns.length + 2 + activeAnalyticColumns.length}>
+                              <td className="p-2 pl-8 text-sm text-gray-400" colSpan={periodColumns.length + 2 + activeAnalyticColumns.length}>
                                 Нет статей в разделе. Нажми “+”, чтобы добавить.
                               </td>
                             </tr>
@@ -1513,26 +1613,37 @@ export default function PlanningPrototype() {
 
                     <div>
                       <div className="text-sm font-semibold text-gray-900">Значения</div>
-                      <div className="mt-3 flex gap-2">
-                        <Button type="button" className={bdg.valuesMode === 'all' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, valuesMode: 'all' }))}>
-                          Все
-                        </Button>
-                        <Button
-                          type="button"
-                          className={bdg.valuesMode === 'selected' ? ui.btnPrimary : ui.btnSecondary}
-                          onClick={() => setBdg((p) => ({ ...p, valuesMode: 'selected' }))}
-                        >
-                          Выбрать
-                        </Button>
-                      </div>
-                      <div className="mt-2 text-xs text-gray-500">В режиме «Все» прототип ограничивает количество комбинаций (чтобы не раздувать таблицу).</div>
+                      <div className="mt-2 text-xs text-gray-500">Для выбранных аналитик отметьте нужные значения. По умолчанию выбраны все значения.</div>
                     </div>
 
-                    {bdg.valuesMode === 'selected' && bdg.analytics.length > 0 ? (
+                    {bdg.analytics.length > 0 ? (
                       <div className="space-y-4">
                         {bdg.analytics.map((k) => (
                           <div key={k} className="border rounded-lg p-3">
-                            <div className="text-sm font-semibold text-gray-900">{k}</div>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-sm font-semibold text-gray-900">{k}</div>
+                              <div className="flex items-center gap-2 text-xs">
+                                <button
+                                  type="button"
+                                  className="text-gray-600 hover:text-gray-800"
+                                  onClick={() => {
+                                    for (const v of ANALYTIC_VALUES[k]) setValueChecked(k, v, true);
+                                  }}
+                                >
+                                  Выбрать все
+                                </button>
+                                <span className="text-gray-300">|</span>
+                                <button
+                                  type="button"
+                                  className="text-gray-600 hover:text-gray-800"
+                                  onClick={() => {
+                                    for (const v of ANALYTIC_VALUES[k]) setValueChecked(k, v, false);
+                                  }}
+                                >
+                                  Снять
+                                </button>
+                              </div>
+                            </div>
                             <div className="mt-2 space-y-2">
                               {ANALYTIC_VALUES[k].map((v) => (
                                 <label key={v} className="flex items-center gap-3 cursor-pointer">
