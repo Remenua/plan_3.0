@@ -60,21 +60,12 @@ const ui = {
   bottomInner: 'max-w-[860px] mx-auto px-6 md:px-10 py-5 flex items-center justify-between',
 } as const;
 
-type PeriodKey =
-  | 'Jan'
-  | 'Feb'
-  | 'Mar'
-  | 'Apr'
-  | 'May'
-  | 'Jun'
-  | 'Jul'
-  | 'Aug'
-  | 'Sep'
-  | 'Oct'
-  | 'Nov'
-  | 'Dec';
+type PeriodKey = string;
+type PeriodColumn = { key: PeriodKey; label: string };
+type TableStep = 'day' | 'week' | 'month';
+type PeriodPreset = '7' | '14' | '30' | '4' | '8' | '12' | '3' | '6';
 
-const PERIODS: { key: PeriodKey; label: string }[] = [
+const MONTH_COLUMNS: PeriodColumn[] = [
   { key: 'Jan', label: 'Янв' },
   { key: 'Feb', label: 'Фев' },
   { key: 'Mar', label: 'Мар' },
@@ -88,6 +79,37 @@ const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'Nov', label: 'Ноя' },
   { key: 'Dec', label: 'Дек' },
 ];
+
+const STEP_OPTIONS: { key: TableStep; label: string }[] = [
+  { key: 'day', label: 'День' },
+  { key: 'week', label: 'Неделя' },
+  { key: 'month', label: 'Месяц' },
+];
+
+const PERIOD_OPTIONS_BY_STEP: Record<TableStep, { key: PeriodPreset; label: string }[]> = {
+  day: [
+    { key: '7', label: '7 дней' },
+    { key: '14', label: '14 дней' },
+    { key: '30', label: '30 дней' },
+  ],
+  week: [
+    { key: '4', label: '4 недели' },
+    { key: '8', label: '8 недель' },
+    { key: '12', label: '12 недель' },
+  ],
+  month: [
+    { key: '3', label: '3 месяца' },
+    { key: '6', label: '6 месяцев' },
+    { key: '12', label: '12 месяцев' },
+  ],
+};
+
+function buildPeriodColumns(step: TableStep, preset: PeriodPreset): PeriodColumn[] {
+  const n = Math.max(1, Number(preset));
+  if (step === 'day') return Array.from({ length: n }, (_, i) => ({ key: `D${i + 1}`, label: `Д${i + 1}` }));
+  if (step === 'week') return Array.from({ length: n }, (_, i) => ({ key: `W${i + 1}`, label: `Н${i + 1}` }));
+  return MONTH_COLUMNS.slice(0, n);
+}
 
 type AnalyticKey = 'Проект' | 'Номенклатура' | 'Организация' | 'ЦФО';
 const ANALYTICS: AnalyticKey[] = ['Проект', 'Организация', 'ЦФО', 'Номенклатура'];
@@ -137,7 +159,7 @@ const makeId = () => Date.now() + Math.floor(Math.random() * 10_000);
 
 function emptyValues(): Record<PeriodKey, string> {
   const out = {} as Record<PeriodKey, string>;
-  for (const p of PERIODS) out[p.key] = '';
+  for (const p of MONTH_COLUMNS) out[p.key] = '';
   return out;
 }
 
@@ -146,8 +168,8 @@ function parseCell(v: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function sumLine(values: Record<PeriodKey, string>): number {
-  return PERIODS.reduce((acc, p) => acc + parseCell(values[p.key]), 0);
+function sumLine(values: Record<PeriodKey, string>, columns: PeriodColumn[]): number {
+  return columns.reduce((acc, p) => acc + parseCell(values[p.key] ?? ''), 0);
 }
 
 function defaultBreakdown(): Breakdown {
@@ -255,9 +277,9 @@ function defaultSections(report: ReportType): Section[] {
   ];
 }
 
-function sumSectionByPeriod(section: Section, planB?: Breakdown): Record<PeriodKey, number> {
+function sumSectionByPeriod(section: Section, columns: PeriodColumn[], planB?: Breakdown): Record<PeriodKey, number> {
   const out = {} as Record<PeriodKey, number>;
-  for (const p of PERIODS) {
+  for (const p of columns) {
     out[p.key] = section.lines.reduce((s, ln) => {
       const eff = ln.breakdown ?? section.breakdown ?? planB;
       if (eff?.analytics.length) return s + ln.combos.reduce((ss, row) => ss + parseCell(row.values[p.key]), 0);
@@ -267,11 +289,11 @@ function sumSectionByPeriod(section: Section, planB?: Breakdown): Record<PeriodK
   return out;
 }
 
-function sumSectionTotal(section: Section, planB?: Breakdown): number {
+function sumSectionTotal(section: Section, columns: PeriodColumn[], planB?: Breakdown): number {
   return section.lines.reduce((acc, ln) => {
     const eff = ln.breakdown ?? section.breakdown ?? planB;
-    if (eff?.analytics.length) return acc + ln.combos.reduce((s, c) => s + sumLine(c.values), 0);
-    return acc + sumLine(ln.values);
+    if (eff?.analytics.length) return acc + ln.combos.reduce((s, c) => s + sumLine(c.values, columns), 0);
+    return acc + sumLine(ln.values, columns);
   }, 0);
 }
 
@@ -302,7 +324,7 @@ type DeleteLineDialogState = {
   const t1 = formatDateISOToRU('2026-02-12') === '12.02.2026';
   const t2 = statusLabel(true) === 'Согласован' && statusLabel(false) === 'Черновик';
   const t3 = parseCell('1,5') === 1.5 && parseCell('abc') === 0;
-  const t4 = sumLine({ ...emptyValues(), Jan: '10', Feb: '5' }) === 15;
+  const t4 = sumLine({ ...emptyValues(), Jan: '10', Feb: '5' }, MONTH_COLUMNS) === 15;
   const t5 = formatBreakdownLabel({ analytics: ['Проект'], valuesMode: 'all', selectedValues: {} }).includes('Проект');
   const t6 = getAddableArticles('ПиУ', 'Выручка', ['Выручка опт']).includes('Выручка маркетплейсы');
   const t7 = !getAddableArticles('ПиУ', 'Выручка', ['Выручка маркетплейсы']).includes('Выручка маркетплейсы');
@@ -377,6 +399,9 @@ function uniqAnalytics(list: AnalyticKey[]): AnalyticKey[] {
 
 export default function PlanningPrototype() {
   const [view, setView] = useState<View>('list');
+  const [tableStep, setTableStep] = useState<TableStep>('month');
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('12');
+  const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodPreset), [tableStep, periodPreset]);
 
   const [plans, setPlans] = useState<Plan[]>([
     {
@@ -523,7 +548,7 @@ export default function PlanningPrototype() {
   const lineTotalsByPeriod = (s: Section, ln: ArticleLine): Record<PeriodKey, number> => {
     const eff = effLineB(s, ln);
     const out = {} as Record<PeriodKey, number>;
-    for (const p of PERIODS) {
+    for (const p of periodColumns) {
       out[p.key] = eff.analytics.length
         ? ln.combos.reduce((acc, c) => acc + parseCell(c.values[p.key]), 0)
         : parseCell(ln.values[p.key]);
@@ -533,7 +558,7 @@ export default function PlanningPrototype() {
 
   const lineTotal = (s: Section, ln: ArticleLine): number => {
     const eff = effLineB(s, ln);
-    return eff.analytics.length ? ln.combos.reduce((acc, c) => acc + sumLine(c.values), 0) : sumLine(ln.values);
+    return eff.analytics.length ? ln.combos.reduce((acc, c) => acc + sumLine(c.values, periodColumns), 0) : sumLine(ln.values, periodColumns);
   };
 
   const [addDlg, setAddDlg] = useState<AddArticlesDialogState>({ open: false, sectionId: null, selected: {} });
@@ -851,8 +876,9 @@ export default function PlanningPrototype() {
       : 0;
     const locked = selectedPlan ? isSectionLockedForArticles(selectedPlan.report, section.name) : false;
     const canAdd = addableCount > 0 && !locked;
-    const byPeriod = sumSectionByPeriod(section, planBreakdown);
+    const byPeriod = sumSectionByPeriod(section, periodColumns, planBreakdown);
     const showHoverActions = hoverSectionId === section.id;
+    const isCalculatedSection = selectedPlan?.report === 'ПиУ' && section.name === 'Чистая прибыль';
 
     return (
       <tr
@@ -860,7 +886,7 @@ export default function PlanningPrototype() {
         onMouseEnter={() => setHoverSectionId(section.id)}
         onMouseLeave={() => setHoverSectionId((p) => (p === section.id ? null : p))}
       >
-        <td className="p-3 font-medium">
+        <td className="p-2 font-medium">
           <div className="flex items-center justify-between gap-2">
             <button type="button" className="flex items-center gap-2 text-left min-w-0" onClick={() => toggleSection(section.id)}>
               <span className="text-gray-500">{section.isOpen ? '▾' : '▸'}</span>
@@ -873,7 +899,7 @@ export default function PlanningPrototype() {
                 onClick={() => openBreakdownPanel({ scope: 'Раздел', sectionId: section.id })}
                 title="Настроить аналитики (разрезы) для раздела"
                 className="w-[92px]"
-                hidden={!showHoverActions}
+                hidden={!showHoverActions || !!isCalculatedSection}
               />
 
               <IconPlusButton
@@ -886,18 +912,18 @@ export default function PlanningPrototype() {
         </td>
 
         {activeAnalyticColumns.map((a) => (
-          <td key={a} className="p-3 text-gray-400">
+          <td key={a} className="p-2 text-gray-400">
             —
           </td>
         ))}
 
-        {PERIODS.map((p) => (
-          <td key={p.key} className="p-3 text-right text-gray-400">
+        {periodColumns.map((p) => (
+          <td key={p.key} className="p-2 text-right text-gray-400">
             {byPeriod[p.key] ? byPeriod[p.key].toLocaleString('ru-RU') : '0'}
           </td>
         ))}
 
-        <td className="p-3 text-right font-medium text-gray-600">{sumSectionTotal(section, planBreakdown).toLocaleString('ru-RU')}</td>
+        <td className="p-2 text-right font-medium text-gray-600">{sumSectionTotal(section, periodColumns, planBreakdown).toLocaleString('ru-RU')}</td>
       </tr>
     );
   };
@@ -916,7 +942,7 @@ export default function PlanningPrototype() {
           onMouseEnter={() => setHoverLineKey(lineKey)}
           onMouseLeave={() => setHoverLineKey((p) => (p === lineKey ? null : p))}
         >
-          <td className="p-3 pl-10">
+          <td className="p-2 pl-8">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0">
                 {isSplit ? (
@@ -965,12 +991,12 @@ export default function PlanningPrototype() {
           </td>
 
           {activeAnalyticColumns.map((a) => (
-            <td key={a} className="p-3 text-gray-400">
+            <td key={a} className="p-2 text-gray-400">
               {isSplit ? '' : '—'}
             </td>
           ))}
 
-          {PERIODS.map((p) => (
+          {periodColumns.map((p) => (
             <td key={p.key} className="p-2">
               {isSplit ? (
                 <div className="text-right text-gray-400 pr-2">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
@@ -991,7 +1017,7 @@ export default function PlanningPrototype() {
         {isSplit && ln.isOpen
           ? ln.combos.map((c) => (
               <tr key={c.id} className="border-b bg-white hover:bg-gray-50">
-                <td className="p-3 pl-16 text-sm text-gray-700">Комбинация</td>
+                <td className="p-2 pl-12 text-sm text-gray-700">Комбинация</td>
 
                 {activeAnalyticColumns.map((a) => (
                   <td key={a} className="p-3 text-sm text-gray-700">
@@ -999,7 +1025,7 @@ export default function PlanningPrototype() {
                   </td>
                 ))}
 
-                {PERIODS.map((p) => (
+                {periodColumns.map((p) => (
                   <td key={p.key} className="p-2">
                     <Input
                       value={c.values[p.key]}
@@ -1010,7 +1036,7 @@ export default function PlanningPrototype() {
                   </td>
                 ))}
 
-                <td className="p-2 text-right font-medium bg-gray-50">{sumLine(c.values).toLocaleString('ru-RU')}</td>
+                <td className="p-2 text-right font-medium bg-gray-50">{sumLine(c.values, periodColumns).toLocaleString('ru-RU')}</td>
               </tr>
             ))
           : null}
@@ -1058,7 +1084,7 @@ export default function PlanningPrototype() {
                         onClick={() => openFromList(plan.id)}
                         onDoubleClick={() => openCard(plan.id)}
                       >
-                        <td className="p-3 font-medium">
+                        <td className="p-2 font-medium">
                           <span className="truncate max-w-[360px] inline-block">{plan.name}</span>
                         </td>
                         <td className="p-3">{plan.author}</td>
@@ -1233,7 +1259,7 @@ export default function PlanningPrototype() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-2xl font-semibold">{selectedPlan?.report ?? 'ПиУ'}</div>
-                    <div className="text-sm text-gray-500 mt-1">Строки — статьи отчёта, столбцы — месяцы. Колонка «Итого».</div>
+                    <div className="text-sm text-gray-500 mt-1">Заполняйте значения по статьям, настраивайте аналитику через кнопку «Аналитики», добавляйте нужные статьи из панели справа. Итоги считаются автоматически.</div>
                   </div>
                   <Button type="button" className={ui.btnSecondary} onClick={() => setView('card')}>
                     ← Назад
@@ -1245,22 +1271,55 @@ export default function PlanningPrototype() {
                   <Pill text={formatBreakdownLabel(planBreakdown)} onClick={() => openBreakdownPanel({ scope: 'План' })} title="Настроить аналитики (разрезы) плана" />
                 </div>
 
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <div className="text-sm text-gray-600">Шаг:</div>
+                  <div className="flex gap-2">
+                    {STEP_OPTIONS.map((opt) => (
+                      <Button
+                        key={opt.key}
+                        type="button"
+                        className={tableStep === opt.key ? ui.btnPrimary : ui.btnSecondary}
+                        onClick={() => {
+                          setTableStep(opt.key);
+                          setPeriodPreset(PERIOD_OPTIONS_BY_STEP[opt.key][0].key);
+                        }}
+                      >
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+
+                  <div className="text-sm text-gray-600 ml-2">Период:</div>
+                  <div className="flex gap-2">
+                    {PERIOD_OPTIONS_BY_STEP[tableStep].map((opt) => (
+                      <Button
+                        key={opt.key}
+                        type="button"
+                        className={periodPreset === opt.key ? ui.btnPrimary : ui.btnSecondary}
+                        onClick={() => setPeriodPreset(opt.key)}
+                      >
+                        {opt.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="mt-4 overflow-x-auto border rounded-lg">
-                  <table className="min-w-[1860px] w-full text-sm">
+                  <table className="min-w-[1180px] w-full text-xs">
                     <thead>
                       <tr className="border-b bg-gray-50">
-                        <th className="p-3 text-left min-w-[360px]">Статья</th>
+                        <th className="p-2 text-left min-w-[240px]">Статья</th>
                         {activeAnalyticColumns.map((a) => (
-                          <th key={a} className="p-3 text-left min-w-[160px]">
+                          <th key={a} className="p-2 text-left min-w-[110px]">
                             {a}
                           </th>
                         ))}
-                        {PERIODS.map((p) => (
-                          <th key={p.key} className="p-3 text-center min-w-[90px]">
+                        {periodColumns.map((p) => (
+                          <th key={p.key} className="p-2 text-center min-w-[72px]">
                             {p.label}
                           </th>
                         ))}
-                        <th className="p-3 text-center min-w-[110px] font-semibold">Итого</th>
+                        <th className="p-2 text-center min-w-[90px] font-semibold">Итого</th>
                       </tr>
                     </thead>
 
@@ -1271,13 +1330,10 @@ export default function PlanningPrototype() {
 
                           {section.isOpen ? section.lines.map((ln) => renderLineRow(section, ln)) : null}
 
-                          {section.isOpen && section.lines.length === 0 ? (
+                          {section.isOpen && section.lines.length === 0 && !(selectedPlan?.report === 'ПиУ' && section.name === 'Чистая прибыль') ? (
                             <tr className="border-b">
-                              <td className="p-3 pl-10 text-sm text-gray-400" colSpan={PERIODS.length + 2 + activeAnalyticColumns.length}>
-                                Нет статей в разделе.
-                                {selectedPlan && isSectionLockedForArticles(selectedPlan.report, section.name)
-                                  ? ' Раздел итоговый — добавлять статьи нельзя.'
-                                  : ' Нажми “+”, чтобы добавить.'}
+                              <td className="p-2 pl-8 text-xs text-gray-400" colSpan={periodColumns.length + 2 + activeAnalyticColumns.length}>
+                                Нет статей в разделе. Нажми “+”, чтобы добавить.
                               </td>
                             </tr>
                           ) : null}
