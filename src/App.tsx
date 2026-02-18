@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -169,18 +169,64 @@ function makeSection(id: number, name: string, isOpen = true, lines: ArticleLine
 
 const SECTION_CATALOG: Record<ReportType, Record<string, string[]>> = {
   ПиУ: {
-    Выручка: ['Выручка маркетплейсы', 'Выручка опт', 'Выручка розница', 'Прочая выручка'],
-    Себестоимость: ['Закупка товара', 'Комиссии маркетплейсов', 'Логистика', 'Складские услуги'],
-    'Коммерческие расходы': ['Маркетинг', 'Доставка клиенту', 'Сервис/гарантия'],
-    'Управленческие расходы': ['Аренда', 'ФОТ админ', 'ИТ/сервисы'],
+    Выручка: [
+      'Выручка маркетплейсы',
+      'Выручка опт',
+      'Выручка розница',
+      'Выручка B2B контракты',
+      'Выручка экспорт',
+      'Выручка подписки',
+      'Прочая выручка',
+    ],
+    Себестоимость: [
+      'Закупка товара',
+      'Сырье и материалы',
+      'Комиссии маркетплейсов',
+      'Логистика',
+      'Складские услуги',
+      'Упаковка',
+      'Производственный брак',
+    ],
+    'Коммерческие расходы': [
+      'Маркетинг',
+      'Реклама performance',
+      'Доставка клиенту',
+      'Комиссии эквайринга',
+      'Сервис/гарантия',
+      'Бонусы клиентам',
+    ],
+    'Управленческие расходы': [
+      'Аренда',
+      'ФОТ админ',
+      'ИТ/сервисы',
+      'Юридические услуги',
+      'Бухгалтерия и аудит',
+      'Связь и интернет',
+      'Командировки',
+    ],
     'Чистая прибыль': [],
   },
   ДДС: {
-    Поступления: ['Поступления от продаж', 'Возвраты/прочие поступления'],
-    Выплаты: ['Оплата поставщикам', 'ФОТ', 'Налоги', 'Аренда'],
-    'Чистый денежный поток': [],
-    'Остаток на начало': [],
-    'Остаток на конец': [],
+    Поступления: [
+      'Поступления от продаж',
+      'Поступления от маркетплейсов',
+      'Погашение дебиторки',
+      'Займы полученные',
+      'Возвраты/прочие поступления',
+    ],
+    Выплаты: [
+      'Оплата поставщикам',
+      'ФОТ',
+      'Налоги',
+      'Аренда',
+      'Маркетинг',
+      'Лизинг/кредиты',
+      'Капитальные затраты',
+      'Прочие операционные выплаты',
+    ],
+    'Чистый денежный поток': ['Операционный денежный поток', 'Инвестиционный денежный поток', 'Финансовый денежный поток'],
+    'Остаток на начало': ['Остаток на расчетных счетах', 'Остаток в кассе'],
+    'Остаток на конец': ['Остаток на расчетных счетах', 'Остаток в кассе'],
   },
 };
 
@@ -242,6 +288,14 @@ type BreakdownDialogState = {
   analytics: AnalyticKey[];
   valuesMode: 'all' | 'selected';
   selectedValues: Partial<Record<AnalyticKey, Record<string, boolean>>>;
+};
+
+
+type DeleteLineDialogState = {
+  open: boolean;
+  sectionId: number | null;
+  lineId: number | null;
+  lineName: string;
 };
 
 (function runSanityChecks() {
@@ -532,6 +586,35 @@ export default function PlanningPrototype() {
 
   const dialogAddableCount = useMemo(() => Object.keys(addDlg.selected).length, [addDlg.selected]);
   const dialogSelectedCount = useMemo(() => Object.values(addDlg.selected).filter(Boolean).length, [addDlg.selected]);
+
+
+  const [deleteDlg, setDeleteDlg] = useState<DeleteLineDialogState>({
+    open: false,
+    sectionId: null,
+    lineId: null,
+    lineName: '',
+  });
+
+  const openDeleteLineDialog = (sectionId: number, lineId: number, lineName: string) => {
+    setDeleteDlg({ open: true, sectionId, lineId, lineName });
+  };
+
+  const closeDeleteLineDialog = () => {
+    setDeleteDlg({ open: false, sectionId: null, lineId: null, lineName: '' });
+  };
+
+  const confirmDeleteLine = () => {
+    if (!selectedPlan || !deleteDlg.sectionId || !deleteDlg.lineId) return;
+
+    updateGrid(selectedPlan.id, (cur) =>
+      cur.map((sct) => {
+        if (sct.id !== deleteDlg.sectionId) return sct;
+        return { ...sct, lines: sct.lines.filter((ln) => ln.id !== deleteDlg.lineId) };
+      }),
+    );
+
+    closeDeleteLineDialog();
+  };
 
   const [bdg, setBdg] = useState<BreakdownDialogState>({
     open: false,
@@ -865,6 +948,18 @@ export default function PlanningPrototype() {
                   title="Добавить комбинацию"
                   hidden={!showLineHover || !isSplit}
                 />
+
+                <button
+                  type="button"
+                  className={`w-8 h-8 rounded-full border border-red-200 bg-white text-red-500 hover:bg-red-50 inline-flex items-center justify-center ${
+                    showLineHover ? 'opacity-100' : 'opacity-0 pointer-events-none'
+                  }`}
+                  onClick={() => openDeleteLineDialog(section.id, ln.id, ln.name)}
+                  title="Удалить статью"
+                  aria-label="Удалить статью"
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             </div>
           </td>
@@ -1207,23 +1302,23 @@ export default function PlanningPrototype() {
             </div>
 
             {addDlg.open ? (
-              <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+              <div className="fixed inset-0 z-50" role="dialog" aria-modal="true">
                 <div className="absolute inset-0 bg-black/30" onClick={closeAddDialog} />
-                <div className="relative w-[560px] max-w-[92vw] rounded-2xl bg-white shadow-xl border">
-                  <div className="p-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <div className="text-xl font-semibold">Добавить статьи</div>
-                        <div className="text-sm text-gray-500 mt-1">
-                          Раздел: <span className="font-medium">{dialogSection?.name ?? '—'}</span>
-                        </div>
+                <div className="absolute right-0 top-0 h-full w-[460px] max-w-[92vw] bg-white border-l shadow-xl">
+                  <div className="p-5 border-b flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-lg font-semibold">Добавить статьи</div>
+                      <div className="text-sm text-gray-500 mt-1">
+                        Раздел: <span className="font-medium">{dialogSection?.name ?? '—'}</span>
                       </div>
-                      <button type="button" className={ui.close} onClick={closeAddDialog}>
-                        × Закрыть
-                      </button>
                     </div>
+                    <button type="button" className={ui.close} onClick={closeAddDialog}>
+                      × Закрыть
+                    </button>
+                  </div>
 
-                    <div className="mt-5 flex items-center justify-between text-sm">
+                  <div className="p-5 space-y-5 overflow-auto h-[calc(100%-72px)]">
+                    <div className="flex items-center justify-between text-sm">
                       <div className="text-gray-500">
                         Доступно: <span className="font-medium text-gray-700">{dialogAddableCount}</span>
                         {' · '}
@@ -1250,29 +1345,57 @@ export default function PlanningPrototype() {
                       </div>
                     </div>
 
-                    <div className="mt-4 max-h-[320px] overflow-auto border rounded-lg">
+                    <div className="max-h-[420px] overflow-auto border rounded-lg">
                       {dialogAddableCount === 0 ? (
                         <div className="p-4 text-sm text-gray-500">Нет доступных статей для добавления.</div>
                       ) : (
                         <ul className="divide-y">
                           {Object.keys(addDlg.selected).map((name) => (
                             <li key={name} className="flex items-center justify-between p-3 hover:bg-gray-50">
-                              <div className="flex items-center gap-3">
+                              <label className="flex items-center gap-3 cursor-pointer">
                                 <Checkbox checked={!!addDlg.selected[name]} onCheckedChange={() => toggleDlgItem(name)} />
                                 <span className="text-sm text-gray-900">{name}</span>
-                              </div>
+                              </label>
                             </li>
                           ))}
                         </ul>
                       )}
                     </div>
 
-                    <div className="mt-6 flex items-center justify-between">
+                    <div className="pt-2 flex items-center justify-between">
                       <Button type="button" className={ui.btnSecondary} onClick={closeAddDialog}>
                         Отменить
                       </Button>
                       <Button type="button" className={ui.btnPrimary} onClick={applyAddDialog} disabled={dialogSelectedCount === 0}>
                         Добавить
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {deleteDlg.open ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+                <div className="absolute inset-0 bg-black/30" onClick={closeDeleteLineDialog} />
+                <div className="relative w-[520px] max-w-[92vw] rounded-2xl bg-white shadow-xl border">
+                  <div className="p-6">
+                    <div className="text-xl font-semibold">Удалить статью?</div>
+                    <div className="mt-3 text-sm text-gray-600">
+                      Вы действительно хотите удалить статью <span className="font-medium text-gray-900">«{deleteDlg.lineName}»</span> из плана?
+                      Все введенные по ней значения и разрезы будут очищены.
+                    </div>
+
+                    <div className="mt-6 flex items-center justify-end gap-2">
+                      <Button type="button" className={ui.btnSecondary} onClick={closeDeleteLineDialog}>
+                        Нет
+                      </Button>
+                      <Button
+                        type="button"
+                        className="bg-red-500 text-white hover:bg-red-600 border border-red-500"
+                        onClick={confirmDeleteLine}
+                      >
+                        Да, удалить
                       </Button>
                     </div>
                   </div>
