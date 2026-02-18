@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronDown, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -456,6 +456,7 @@ export default function PlanningPrototype() {
   const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodFrom, periodTo), [tableStep, periodFrom, periodTo]);
   const [editingCell, setEditingCell] = useState<{ sectionId: number; lineId: number; comboId?: number; key: PeriodKey } | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
+  const [isPeriodPickerOpen, setIsPeriodPickerOpen] = useState<boolean>(false);
 
   const [plans, setPlans] = useState<Plan[]>([
     {
@@ -1416,6 +1417,7 @@ export default function PlanningPrototype() {
                             const nextPreset = QUICK_PERIOD_OPTIONS_BY_STEP[opt.key][0].key;
                             setQuickPreset(nextPreset);
                             applyQuickPreset(opt.key, nextPreset);
+                            setIsPeriodPickerOpen(false);
                           }}
                         >
                           {opt.label}
@@ -1435,6 +1437,7 @@ export default function PlanningPrototype() {
                           onClick={() => {
                             setQuickPreset(opt.key);
                             applyQuickPreset(tableStep, opt.key);
+                            setIsPeriodPickerOpen(false);
                           }}
                         >
                           {opt.label}
@@ -1443,9 +1446,46 @@ export default function PlanningPrototype() {
                     </div>
 
                     <div className="text-sm text-gray-600 ml-2">Период:</div>
-                    <Input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="w-[160px] h-9 bg-white" />
-                    <span className="text-gray-400">—</span>
-                    <Input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="w-[160px] h-9 bg-white" />
+                    <div className="relative">
+                      <button
+                        type="button"
+                        className="h-9 min-w-[260px] px-3 rounded-lg border bg-white text-sm text-gray-700 inline-flex items-center justify-between gap-2 hover:bg-gray-100"
+                        onClick={() => setIsPeriodPickerOpen((v) => !v)}
+                        aria-label="Открыть выбор периода"
+                      >
+                        <span className="inline-flex items-center gap-2">
+                          <CalendarDays size={14} />
+                          {formatDateISOToRU(periodFrom)} — {formatDateISOToRU(periodTo)}
+                        </span>
+                        <ChevronDown size={14} />
+                      </button>
+
+                      {isPeriodPickerOpen ? (
+                        <div className="absolute z-20 mt-2 right-0 w-[360px] rounded-xl border bg-white shadow-lg p-3">
+                          <div className="text-xs text-gray-500 mb-2">Выберите произвольный период</div>
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                            <Input
+                              type="date"
+                              value={periodFrom}
+                              onChange={(e) => setPeriodFrom(e.target.value)}
+                              className="h-9 bg-white"
+                            />
+                            <span className="text-gray-400">—</span>
+                            <Input
+                              type="date"
+                              value={periodTo}
+                              onChange={(e) => setPeriodTo(e.target.value)}
+                              className="h-9 bg-white"
+                            />
+                          </div>
+                          <div className="mt-3 flex justify-end">
+                            <Button type="button" className={ui.btnSecondary} onClick={() => setIsPeriodPickerOpen(false)}>
+                              Готово
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
 
