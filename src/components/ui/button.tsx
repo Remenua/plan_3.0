@@ -2,19 +2,16 @@ import type React from 'react';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
 
-export function Button({ className, style, ...props }: ButtonProps) {
+export function Button({ className = '', type = 'button', ...props }: ButtonProps) {
   return (
     <button
       {...props}
-      className={className}
-      style={{
-        border: '1px solid #d1d5db',
-        borderRadius: 8,
-        padding: '8px 12px',
-        background: props.disabled ? '#f3f4f6' : '#fff',
-        cursor: props.disabled ? 'not-allowed' : 'pointer',
-        ...style,
-      }}
+      type={type}
+      className={[
+        'inline-flex items-center justify-center rounded-md px-3 py-2 text-sm transition-colors',
+        'disabled:opacity-50 disabled:pointer-events-none',
+        className,
+      ].join(' ')}
     />
   );
 }

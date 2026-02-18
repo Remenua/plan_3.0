@@ -6,14 +6,13 @@ type CheckboxProps = {
   className?: string;
 };
 
-export function Checkbox({ checked = false, onCheckedChange, className }: CheckboxProps) {
+export function Checkbox({ checked = false, onCheckedChange, className = '' }: CheckboxProps) {
   return (
     <input
       type="checkbox"
-      className={className}
+      className={['h-4 w-4 rounded border-gray-300 accent-amber-400', className].join(' ')}
       checked={checked}
       onChange={(e) => onCheckedChange?.(e.target.checked)}
-      style={{ width: 16, height: 16 }}
     />
   );
 }
