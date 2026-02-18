@@ -164,11 +164,25 @@ function buildPeriodColumns(step: TableStep, fromISO: string, toISOValue: string
 type AnalyticKey = 'Проект' | 'Номенклатура' | 'Организация' | 'ЦФО';
 const ANALYTICS: AnalyticKey[] = ['Проект', 'Организация', 'ЦФО', 'Номенклатура'];
 
+const PROJECT_PREFIXES = ['ЖК Северный', 'ЖК Центральный', 'ЖК Южный', 'ЖК Парковый', 'ЖК Речной', 'ЖК Лесной', 'ЖК Солнечный', 'ЖК Город'];
+const PROJECT_NAMES = Array.from({ length: 100 }, (_, i) => {
+  const prefix = PROJECT_PREFIXES[i % PROJECT_PREFIXES.length];
+  const queue = Math.floor(i / PROJECT_PREFIXES.length) + 1;
+  return `${prefix}, очередь ${queue}`;
+});
+
+const NOMENCLATURE_GROUPS = ['Бетон', 'Арматура', 'Кирпич', 'Плита перекрытия', 'Кабель силовой', 'Труба ПВХ', 'Сухая смесь', 'Краска фасадная'];
+const NOMENCLATURE_ITEMS = Array.from({ length: 300 }, (_, i) => {
+  const group = NOMENCLATURE_GROUPS[i % NOMENCLATURE_GROUPS.length];
+  const code = `${(i + 1).toString().padStart(3, '0')}`;
+  return `${group} №${code}`;
+});
+
 const ANALYTIC_VALUES: Record<AnalyticKey, string[]> = {
-  Проект: ['Проект A', 'Проект B', 'Проект C'],
-  Организация: ['ООО Ромашка', 'ООО Василек'],
-  ЦФО: ['Продажи', 'Маркетинг', 'Администрация'],
-  Номенклатура: ['SKU-1', 'SKU-2', 'SKU-3'],
+  Проект: PROJECT_NAMES,
+  Организация: ['ООО Ромашка Девелопмент', 'ООО Василек Строй', 'ООО СК Альфа'],
+  ЦФО: ['Девелопмент', 'СМР', 'Снабжение', 'Продажи', 'Маркетинг', 'ИТ', 'Финансы', 'Юридический блок', 'Администрация', 'Сервис'],
+  Номенклатура: NOMENCLATURE_ITEMS,
 };
 
 type Breakdown = {
@@ -347,6 +361,27 @@ function sumSectionTotal(section: Section, columns: PeriodColumn[], planB?: Brea
   }, 0);
 }
 
+function hashString(input: string): number {
+  let h = 0;
+  for (let i = 0; i < input.length; i += 1) h = (h * 31 + input.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+function estimatePrevYearFact(currentTotal: number, seed: string): number {
+  if (currentTotal > 0) return currentTotal * 0.92;
+  const h = hashString(seed);
+  const base = 120_000 + (h % 380_000);
+  return base;
+}
+
+function formatMoney(v: number): string {
+  return v.toLocaleString('ru-RU');
+}
+
+function formatPercent(v: number): string {
+  return `${v.toLocaleString('ru-RU', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+}
+
 type AddArticlesDialogState = {
   open: boolean;
   sectionId: number | null;
@@ -457,6 +492,7 @@ export default function PlanningPrototype() {
   const [editingCell, setEditingCell] = useState<{ sectionId: number; lineId: number; comboId?: number; key: PeriodKey } | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
   const [isPeriodPickerOpen, setIsPeriodPickerOpen] = useState<boolean>(false);
+  const [showPrevYearFact, setShowPrevYearFact] = useState<boolean>(false);
 
   const [plans, setPlans] = useState<Plan[]>([
     {
@@ -970,6 +1006,38 @@ export default function PlanningPrototype() {
     setEditingValue('');
   };
 
+  const fillFromPrevYearFact = () => {
+    if (!selectedPlan) return;
+    const colCount = Math.max(1, periodColumns.length);
+
+    updateGrid(selectedPlan.id, (cur) =>
+      cur.map((section) => ({
+        ...section,
+        lines: section.lines.map((ln) => {
+          const eff = effLineB(section, ln);
+          if (eff.analytics.length) {
+            return {
+              ...ln,
+              combos: ln.combos.map((combo) => {
+                const comboFact = estimatePrevYearFact(sumLine(combo.values, periodColumns), `${ln.name}:${Object.values(combo.dims).join('|')}`);
+                const perCell = comboFact / colCount;
+                const next = { ...combo.values };
+                for (const p of periodColumns) next[p.key] = perCell.toFixed(2);
+                return { ...combo, values: next };
+              }),
+            };
+          }
+
+          const fact = estimatePrevYearFact(sumLine(ln.values, periodColumns), ln.name);
+          const perCell = fact / colCount;
+          const next = { ...ln.values };
+          for (const p of periodColumns) next[p.key] = perCell.toFixed(2);
+          return { ...ln, values: next };
+        }),
+      })),
+    );
+  };
+
   const renderSectionRow = (section: Section) => {
     const addableCount = selectedPlan
       ? getAddableArticles(selectedPlan.report, section.name, section.lines.map((l) => l.name)).length
@@ -1023,7 +1091,15 @@ export default function PlanningPrototype() {
           </td>
         ))}
 
-        <td className="p-2 text-right font-medium text-gray-600">{sumSectionTotal(section, periodColumns, planBreakdown).toLocaleString('ru-RU')}</td>
+        <td className="p-2 text-right font-medium text-gray-600">{formatMoney(sumSectionTotal(section, periodColumns, planBreakdown))}</td>
+
+        {showPrevYearFact ? (
+          <>
+            <td className="p-2 text-right text-gray-500">{formatMoney(estimatePrevYearFact(sumSectionTotal(section, periodColumns, planBreakdown), section.name))}</td>
+            <td className="p-2 text-right text-gray-500">{formatMoney(sumSectionTotal(section, periodColumns, planBreakdown) - estimatePrevYearFact(sumSectionTotal(section, periodColumns, planBreakdown), section.name))}</td>
+            <td className="p-2 text-right text-gray-500">{formatPercent(estimatePrevYearFact(sumSectionTotal(section, periodColumns, planBreakdown), section.name) ? ((sumSectionTotal(section, periodColumns, planBreakdown) - estimatePrevYearFact(sumSectionTotal(section, periodColumns, planBreakdown), section.name)) / estimatePrevYearFact(sumSectionTotal(section, periodColumns, planBreakdown), section.name)) * 100 : 0)}</td>
+          </>
+        ) : null}
       </tr>
     );
   };
@@ -1097,7 +1173,7 @@ export default function PlanningPrototype() {
           ))}
 
           {periodColumns.map((p) => (
-            <td key={p.key} className="p-2">
+            <td key={p.key} className="p-2 h-8 align-middle">
               {isSplit ? (
                 <div className="text-right text-gray-400 pr-2">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
               ) : editingCell && editingCell.sectionId === section.id && editingCell.lineId === ln.id && !editingCell.comboId && editingCell.key === p.key ? (
@@ -1110,7 +1186,7 @@ export default function PlanningPrototype() {
                     if (e.key === 'Enter') commitEditingCell();
                     if (e.key === 'Escape') cancelEditingCell();
                   }}
-                  className="w-full h-8 bg-transparent px-1 text-right text-sm outline-none"
+                  className="w-full h-8 bg-transparent px-1 text-right text-sm leading-8 outline-none border-0 m-0"
                   inputMode="decimal"
                 />
               ) : (
@@ -1125,13 +1201,21 @@ export default function PlanningPrototype() {
             </td>
           ))}
 
-          <td className="p-2 text-right font-medium bg-gray-50">{lineTotal(section, ln).toLocaleString('ru-RU')}</td>
+          <td className="p-2 text-right font-medium bg-gray-50">{formatMoney(lineTotal(section, ln))}</td>
+
+          {showPrevYearFact ? (
+            <>
+              <td className="p-2 text-right text-gray-500">{formatMoney(estimatePrevYearFact(lineTotal(section, ln), ln.name))}</td>
+              <td className="p-2 text-right text-gray-500">{formatMoney(lineTotal(section, ln) - estimatePrevYearFact(lineTotal(section, ln), ln.name))}</td>
+              <td className="p-2 text-right text-gray-500">{formatPercent(estimatePrevYearFact(lineTotal(section, ln), ln.name) ? ((lineTotal(section, ln) - estimatePrevYearFact(lineTotal(section, ln), ln.name)) / estimatePrevYearFact(lineTotal(section, ln), ln.name)) * 100 : 0)}</td>
+            </>
+          ) : null}
         </tr>
 
         {isSplit && ln.isOpen
           ? ln.combos.map((c) => (
               <tr key={c.id} className="border-b bg-white hover:bg-gray-50">
-                <td className="p-2 pl-12 text-sm text-gray-700">Комбинация</td>
+                <td className="p-2 pl-12 text-sm text-gray-700">{ln.name}</td>
 
                 {activeAnalyticColumns.map((a) => (
                   <td key={a} className="p-3 text-sm text-gray-700">
@@ -1151,7 +1235,7 @@ export default function PlanningPrototype() {
                           if (e.key === 'Enter') commitEditingCell();
                           if (e.key === 'Escape') cancelEditingCell();
                         }}
-                        className="w-full h-8 bg-transparent px-1 text-right text-sm outline-none"
+                        className="w-full h-8 bg-transparent px-1 text-right text-sm leading-8 outline-none border-0 m-0"
                         inputMode="decimal"
                       />
                     ) : (
@@ -1166,7 +1250,15 @@ export default function PlanningPrototype() {
                   </td>
                 ))}
 
-                <td className="p-2 text-right font-medium bg-gray-50">{sumLine(c.values, periodColumns).toLocaleString('ru-RU')}</td>
+                <td className="p-2 text-right font-medium bg-gray-50">{formatMoney(sumLine(c.values, periodColumns))}</td>
+
+                {showPrevYearFact ? (
+                  <>
+                    <td className="p-2 text-right text-gray-500">{formatMoney(estimatePrevYearFact(sumLine(c.values, periodColumns), `${ln.name}:${Object.values(c.dims).join('|')}`))}</td>
+                    <td className="p-2 text-right text-gray-500">{formatMoney(sumLine(c.values, periodColumns) - estimatePrevYearFact(sumLine(c.values, periodColumns), `${ln.name}:${Object.values(c.dims).join('|')}`))}</td>
+                    <td className="p-2 text-right text-gray-500">{formatPercent(estimatePrevYearFact(sumLine(c.values, periodColumns), `${ln.name}:${Object.values(c.dims).join('|')}`) ? ((sumLine(c.values, periodColumns) - estimatePrevYearFact(sumLine(c.values, periodColumns), `${ln.name}:${Object.values(c.dims).join('|')}`)) / estimatePrevYearFact(sumLine(c.values, periodColumns), `${ln.name}:${Object.values(c.dims).join('|')}`)) * 100 : 0)}</td>
+                  </>
+                ) : null}
               </tr>
             ))
           : null}
@@ -1396,12 +1488,26 @@ export default function PlanningPrototype() {
                   </Button>
                 </div>
 
-                <div className="mt-4 flex items-center gap-2">
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <div className="text-sm text-gray-500">План:</div>
                   <Pill text={formatBreakdownLabel(planBreakdown)} onClick={() => openBreakdownPanel({ scope: 'План' })} title="Настроить аналитики (разрезы) плана" />
+                  {activeAnalyticColumns.map((tag) => (
+                    <span key={tag} className="h-7 px-2 inline-flex items-center rounded-full bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                      {tag}
+                    </span>
+                  ))}
                 </div>
 
                 <div className="mt-3 rounded-xl border p-3 bg-gray-50">
+                  <div className="mb-3 flex flex-wrap items-center gap-3">
+                    <Button type="button" className={ui.btnSecondary} onClick={fillFromPrevYearFact}>
+                      Заполнить из факта прошлого года
+                    </Button>
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+                      <Checkbox checked={showPrevYearFact} onCheckedChange={(v) => setShowPrevYearFact(!!v)} />
+                      Выводить факт за прошлый год
+                    </label>
+                  </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="text-sm text-gray-600">Шаг таблицы:</div>
                     <div className="inline-flex rounded-lg border bg-white p-1">
@@ -1505,6 +1611,13 @@ export default function PlanningPrototype() {
                           </th>
                         ))}
                         <th className="p-2 text-center min-w-[90px] font-semibold">Итого</th>
+                        {showPrevYearFact ? (
+                          <>
+                            <th className="p-2 text-center min-w-[110px]">Факт ПГ</th>
+                            <th className="p-2 text-center min-w-[110px]">Откл. ₽</th>
+                            <th className="p-2 text-center min-w-[100px]">Откл. %</th>
+                          </>
+                        ) : null}
                       </tr>
                     </thead>
 
