@@ -454,6 +454,8 @@ export default function PlanningPrototype() {
   const [periodFrom, setPeriodFrom] = useState<string>('2026-01-01');
   const [periodTo, setPeriodTo] = useState<string>('2026-12-31');
   const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodFrom, periodTo), [tableStep, periodFrom, periodTo]);
+  const [editingCell, setEditingCell] = useState<{ sectionId: number; lineId: number; comboId?: number; key: PeriodKey } | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
 
   const [plans, setPlans] = useState<Plan[]>([
     {
@@ -942,6 +944,31 @@ export default function PlanningPrototype() {
     return false;
   };
 
+  const startEditLineCell = (sectionId: number, lineId: number, key: PeriodKey, current: string) => {
+    setEditingCell({ sectionId, lineId, key });
+    setEditingValue(current ?? '');
+  };
+
+  const startEditComboCell = (sectionId: number, lineId: number, comboId: number, key: PeriodKey, current: string) => {
+    setEditingCell({ sectionId, lineId, comboId, key });
+    setEditingValue(current ?? '');
+  };
+
+  const commitEditingCell = () => {
+    if (!editingCell) return;
+    if (editingCell.comboId) {
+      setComboCell(editingCell.sectionId, editingCell.lineId, editingCell.comboId, editingCell.key, editingValue);
+    } else {
+      setCell(editingCell.sectionId, editingCell.lineId, editingCell.key, editingValue);
+    }
+    setEditingCell(null);
+  };
+
+  const cancelEditingCell = () => {
+    setEditingCell(null);
+    setEditingValue('');
+  };
+
   const renderSectionRow = (section: Section) => {
     const addableCount = selectedPlan
       ? getAddableArticles(selectedPlan.report, section.name, section.lines.map((l) => l.name)).length
@@ -1072,15 +1099,24 @@ export default function PlanningPrototype() {
             <td key={p.key} className="p-2">
               {isSplit ? (
                 <div className="text-right text-gray-400 pr-2">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
+              ) : editingCell && editingCell.sectionId === section.id && editingCell.lineId === ln.id && !editingCell.comboId && editingCell.key === p.key ? (
+                <input
+                  autoFocus
+                  value={editingValue}
+                  onChange={(e) => setEditingValue(e.target.value)}
+                  onBlur={commitEditingCell}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEditingCell();
+                    if (e.key === 'Escape') cancelEditingCell();
+                  }}
+                  className="w-full h-8 bg-transparent px-1 text-right text-sm outline-none"
+                  inputMode="decimal"
+                />
               ) : (
                 <button
                   type="button"
-                  className="w-full h-8 rounded-md border border-gray-200 bg-white px-2 text-right text-sm hover:border-amber-300 hover:bg-amber-50"
-                  onClick={() => {
-                    const next = window.prompt('Введите значение', ln.values[p.key] ?? '');
-                    if (next === null) return;
-                    setCell(section.id, ln.id, p.key, next.trim());
-                  }}
+                  className="w-full h-8 bg-transparent px-1 text-right text-sm hover:bg-amber-50"
+                  onClick={() => startEditLineCell(section.id, ln.id, p.key, ln.values[p.key] ?? '')}
                 >
                   {ln.values[p.key] || '—'}
                 </button>
@@ -1104,17 +1140,28 @@ export default function PlanningPrototype() {
 
                 {periodColumns.map((p) => (
                   <td key={p.key} className="p-2">
-                    <button
-                      type="button"
-                      className="w-full h-8 rounded-md border border-gray-200 bg-white px-2 text-right text-sm hover:border-amber-300 hover:bg-amber-50"
-                      onClick={() => {
-                        const next = window.prompt('Введите значение', c.values[p.key] ?? '');
-                        if (next === null) return;
-                        setComboCell(section.id, ln.id, c.id, p.key, next.trim());
-                      }}
-                    >
-                      {c.values[p.key] || '—'}
-                    </button>
+                    {editingCell && editingCell.sectionId === section.id && editingCell.lineId === ln.id && editingCell.comboId === c.id && editingCell.key === p.key ? (
+                      <input
+                        autoFocus
+                        value={editingValue}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={commitEditingCell}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditingCell();
+                          if (e.key === 'Escape') cancelEditingCell();
+                        }}
+                        className="w-full h-8 bg-transparent px-1 text-right text-sm outline-none"
+                        inputMode="decimal"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="w-full h-8 bg-transparent px-1 text-right text-sm hover:bg-amber-50"
+                        onClick={() => startEditComboCell(section.id, ln.id, c.id, p.key, c.values[p.key] ?? '')}
+                      >
+                        {c.values[p.key] || '—'}
+                      </button>
+                    )}
                   </td>
                 ))}
 
@@ -1353,7 +1400,7 @@ export default function PlanningPrototype() {
                   <Pill text={formatBreakdownLabel(planBreakdown)} onClick={() => openBreakdownPanel({ scope: 'План' })} title="Настроить аналитики (разрезы) плана" />
                 </div>
 
-                <div className="mt-3 rounded-xl border p-3 bg-gray-50 space-y-3">
+                <div className="mt-3 rounded-xl border p-3 bg-gray-50">
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="text-sm text-gray-600">Шаг таблицы:</div>
                     <div className="inline-flex rounded-lg border bg-white p-1">
@@ -1394,13 +1441,11 @@ export default function PlanningPrototype() {
                         </button>
                       ))}
                     </div>
-                  </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div className="text-sm text-gray-600">Период (календарь):</div>
-                    <Input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="w-[170px] h-9" />
+                    <div className="text-sm text-gray-600 ml-2">Период:</div>
+                    <Input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className="w-[160px] h-9 bg-white" />
                     <span className="text-gray-400">—</span>
-                    <Input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="w-[170px] h-9" />
+                    <Input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className="w-[160px] h-9 bg-white" />
                   </div>
                 </div>
 
