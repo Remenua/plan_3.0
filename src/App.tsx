@@ -395,6 +395,8 @@ type BreakdownDialogState = {
   analytics: AnalyticKey[];
   valuesMode: 'all' | 'selected';
   selectedValues: Partial<Record<AnalyticKey, Record<string, boolean>>>;
+  step: 1 | 2 | 3;
+  confirmedOnlyArticle: boolean;
 };
 
 
@@ -764,6 +766,8 @@ export default function PlanningPrototype() {
     analytics: [],
     valuesMode: 'all',
     selectedValues: {},
+    step: 1,
+    confirmedOnlyArticle: false,
   });
 
   const closeBreakdownPanel = () => setBdg((p) => ({ ...p, open: false, target: null }));
@@ -799,15 +803,20 @@ export default function PlanningPrototype() {
       analytics: [...(current.analytics ?? [])],
       valuesMode: 'selected',
       selectedValues: selectedValuesMap,
+      step: target.scope === 'Статья' ? 1 : 3,
+      confirmedOnlyArticle: false,
     });
   };
 
   const setAnalyticsChecked = (k: AnalyticKey, checked: boolean) => {
     setBdg((prev) => {
+      const isArticleTarget = prev.target?.scope === 'Статья';
       const analytics = checked
-        ? prev.analytics.includes(k)
-          ? prev.analytics
-          : [...prev.analytics, k]
+        ? isArticleTarget
+          ? [k]
+          : prev.analytics.includes(k)
+            ? prev.analytics
+            : [...prev.analytics, k]
         : prev.analytics.filter((x) => x !== k);
 
       const selectedValues = { ...prev.selectedValues };
@@ -817,6 +826,12 @@ export default function PlanningPrototype() {
         selectedValues[k] = m;
       }
       if (!checked) delete selectedValues[k];
+
+      if (checked && isArticleTarget) {
+        for (const existing of Object.keys(selectedValues) as AnalyticKey[]) {
+          if (existing !== k) delete selectedValues[existing];
+        }
+      }
 
       return { ...prev, analytics, selectedValues };
     });
@@ -884,6 +899,7 @@ export default function PlanningPrototype() {
 
   const applyBreakdown = () => {
     if (!selectedPlan || !bdg.target) return;
+    if (bdg.target.scope === 'Статья' && !bdg.confirmedOnlyArticle) return;
     const nb = buildBreakdownFromDialog();
 
     const applyToLine = (ln: ArticleLine, eff: Breakdown): ArticleLine => {
@@ -929,7 +945,6 @@ export default function PlanningPrototype() {
           return {
             ...s,
             lines: s.lines.map((ln) => {
-              if (bdg.applyTo === 'section') return applyToLine(ln, nb);
               if (ln.id !== lineId) return ln;
               return applyToLine(ln, nb);
             }),
@@ -1173,30 +1188,34 @@ export default function PlanningPrototype() {
           ))}
 
           {periodColumns.map((p) => (
-            <td key={p.key} className="p-2 h-8 align-middle">
+            <td key={p.key} className="p-2 align-middle">
               {isSplit ? (
-                <div className="text-right text-gray-400 pr-2">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
+                <div className="h-8 text-right text-gray-400 pr-2 leading-8">{totalsByPeriod[p.key] ? totalsByPeriod[p.key].toLocaleString('ru-RU') : '0'}</div>
               ) : editingCell && editingCell.sectionId === section.id && editingCell.lineId === ln.id && !editingCell.comboId && editingCell.key === p.key ? (
-                <input
-                  autoFocus
-                  value={editingValue}
-                  onChange={(e) => setEditingValue(e.target.value)}
-                  onBlur={commitEditingCell}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') commitEditingCell();
-                    if (e.key === 'Escape') cancelEditingCell();
-                  }}
-                  className="w-full h-8 bg-transparent px-1 text-right text-sm leading-8 outline-none border-0 m-0"
-                  inputMode="decimal"
-                />
+                <div className="h-8">
+                  <input
+                    autoFocus
+                    value={editingValue}
+                    onChange={(e) => setEditingValue(e.target.value)}
+                    onBlur={commitEditingCell}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitEditingCell();
+                      if (e.key === 'Escape') cancelEditingCell();
+                    }}
+                    className="block w-full h-8 box-border appearance-none bg-transparent px-1 text-right text-sm leading-8 border-0 m-0 outline-none focus:outline-none"
+                    inputMode="decimal"
+                  />
+                </div>
               ) : (
-                <button
-                  type="button"
-                  className="w-full h-8 bg-transparent px-1 text-right text-sm hover:bg-amber-50"
-                  onClick={() => startEditLineCell(section.id, ln.id, p.key, ln.values[p.key] ?? '')}
-                >
-                  {ln.values[p.key] || '—'}
-                </button>
+                <div className="h-8">
+                  <button
+                    type="button"
+                    className="block w-full h-8 bg-transparent px-1 text-right text-sm leading-8 hover:bg-amber-50 outline-none"
+                    onClick={() => startEditLineCell(section.id, ln.id, p.key, ln.values[p.key] ?? '')}
+                  >
+                    {ln.values[p.key] || '—'}
+                  </button>
+                </div>
               )}
             </td>
           ))}
@@ -1224,28 +1243,32 @@ export default function PlanningPrototype() {
                 ))}
 
                 {periodColumns.map((p) => (
-                  <td key={p.key} className="p-2">
+                  <td key={p.key} className="p-2 align-middle">
                     {editingCell && editingCell.sectionId === section.id && editingCell.lineId === ln.id && editingCell.comboId === c.id && editingCell.key === p.key ? (
-                      <input
-                        autoFocus
-                        value={editingValue}
-                        onChange={(e) => setEditingValue(e.target.value)}
-                        onBlur={commitEditingCell}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitEditingCell();
-                          if (e.key === 'Escape') cancelEditingCell();
-                        }}
-                        className="w-full h-8 bg-transparent px-1 text-right text-sm leading-8 outline-none border-0 m-0"
-                        inputMode="decimal"
-                      />
+                      <div className="h-8">
+                        <input
+                          autoFocus
+                          value={editingValue}
+                          onChange={(e) => setEditingValue(e.target.value)}
+                          onBlur={commitEditingCell}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitEditingCell();
+                            if (e.key === 'Escape') cancelEditingCell();
+                          }}
+                          className="block w-full h-8 box-border appearance-none bg-transparent px-1 text-right text-sm leading-8 border-0 m-0 outline-none focus:outline-none"
+                          inputMode="decimal"
+                        />
+                      </div>
                     ) : (
-                      <button
-                        type="button"
-                        className="w-full h-8 bg-transparent px-1 text-right text-sm hover:bg-amber-50"
-                        onClick={() => startEditComboCell(section.id, ln.id, c.id, p.key, c.values[p.key] ?? '')}
-                      >
-                        {c.values[p.key] || '—'}
-                      </button>
+                      <div className="h-8">
+                        <button
+                          type="button"
+                          className="block w-full h-8 bg-transparent px-1 text-right text-sm leading-8 hover:bg-amber-50 outline-none"
+                          onClick={() => startEditComboCell(section.id, ln.id, c.id, p.key, c.values[p.key] ?? '')}
+                        >
+                          {c.values[p.key] || '—'}
+                        </button>
+                      </div>
                     )}
                   </td>
                 ))}
@@ -1269,6 +1292,11 @@ export default function PlanningPrototype() {
   const openFromList = (id: number) => {
     setSelectedPlanId(id);
   };
+
+  const isArticleBreakdownWizard = bdg.target?.scope === 'Статья';
+  const selectedWizardAnalytic = bdg.analytics[0] as AnalyticKey | undefined;
+  const canProceedBreakdownStep1 = !isArticleBreakdownWizard || bdg.analytics.length > 0;
+  const canProceedBreakdownStep2 = !isArticleBreakdownWizard || (selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false);
 
   return (
     <div className={ui.page}>
@@ -1772,51 +1800,66 @@ export default function PlanningPrototype() {
                   </div>
 
                   <div className="p-5 space-y-6 overflow-auto h-[calc(100%-64px)]">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Аналитики</div>
-                      <div className="mt-3 space-y-2">
-                        {ANALYTICS.map((k) => {
-                          const checked = bdg.analytics.includes(k);
-                          return (
-                            <div key={k} className="flex items-center justify-between gap-2">
-                              <label className="flex items-center gap-3 cursor-pointer">
-                                <Checkbox checked={checked} onCheckedChange={(v) => setAnalyticsChecked(k, !!v)} />
-                                <span className="text-sm text-gray-900">{k}</span>
-                              </label>
-                              <div className="flex items-center gap-1">
-                                <Button
-                                  type="button"
-                                  className={`${ui.btnSecondary} w-8 h-8 px-0`}
-                                  onClick={() => moveAnalytic(k, -1)}
-                                  disabled={!checked}
-                                  title="Вверх"
-                                >
-                                  ↑
-                                </Button>
-                                <Button
-                                  type="button"
-                                  className={`${ui.btnSecondary} w-8 h-8 px-0`}
-                                  onClick={() => moveAnalytic(k, +1)}
-                                  disabled={!checked}
-                                  title="Вниз"
-                                >
-                                  ↓
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
+                    {isArticleBreakdownWizard ? (
+                      <div className="rounded-lg border bg-gray-50 p-3 text-xs text-gray-600">
+                        Шаг {bdg.step} из 3
                       </div>
-                    </div>
+                    ) : null}
 
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">Значения</div>
-                      <div className="mt-2 text-xs text-gray-500">Для выбранных аналитик отметьте нужные значения. По умолчанию выбраны все значения.</div>
-                    </div>
+                    {(!isArticleBreakdownWizard || bdg.step === 1) ? (
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">Шаг 1. Аналитика</div>
+                        <div className="mt-2 text-xs text-gray-500">
+                          {isArticleBreakdownWizard ? 'Выберите одну аналитику, по которой нужно разбить выбранную статью.' : 'Выберите аналитики и их порядок.'}
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {ANALYTICS.map((k) => {
+                            const checked = bdg.analytics.includes(k);
+                            return (
+                              <div key={k} className="flex items-center justify-between gap-2">
+                                <label className="flex items-center gap-3 cursor-pointer">
+                                  <Checkbox checked={checked} onCheckedChange={(v) => setAnalyticsChecked(k, !!v)} />
+                                  <span className="text-sm text-gray-900">{k}</span>
+                                </label>
+                                {!isArticleBreakdownWizard ? (
+                                  <div className="flex items-center gap-1">
+                                    <Button
+                                      type="button"
+                                      className={`${ui.btnSecondary} w-8 h-8 px-0`}
+                                      onClick={() => moveAnalytic(k, -1)}
+                                      disabled={!checked}
+                                      title="Вверх"
+                                    >
+                                      ↑
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      className={`${ui.btnSecondary} w-8 h-8 px-0`}
+                                      onClick={() => moveAnalytic(k, +1)}
+                                      disabled={!checked}
+                                      title="Вниз"
+                                    >
+                                      ↓
+                                    </Button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
 
-                    {bdg.analytics.length > 0 ? (
+                    {(!isArticleBreakdownWizard || bdg.step === 2) ? (
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">Шаг 2. Значения</div>
+                        <div className="mt-2 text-xs text-gray-500">Для выбранной аналитики отметьте нужные значения. По умолчанию выбраны все значения.</div>
+                      </div>
+                    ) : null}
+
+                    {(!isArticleBreakdownWizard || bdg.step === 2) && bdg.analytics.length > 0 ? (
                       <div className="space-y-4">
-                        {bdg.analytics.map((k) => (
+                        {(isArticleBreakdownWizard ? bdg.analytics.slice(0, 1) : bdg.analytics).map((k) => (
                           <div key={k} className="border rounded-lg p-3">
                             <div className="flex items-center justify-between gap-2">
                               <div className="text-sm font-semibold text-gray-900">{k}</div>
@@ -1842,7 +1885,7 @@ export default function PlanningPrototype() {
                                 </button>
                               </div>
                             </div>
-                            <div className="mt-2 space-y-2">
+                            <div className="mt-2 max-h-64 overflow-auto space-y-2">
                               {ANALYTIC_VALUES[k].map((v) => (
                                 <label key={v} className="flex items-center gap-3 cursor-pointer">
                                   <Checkbox checked={!!bdg.selectedValues[k]?.[v]} onCheckedChange={(c) => setValueChecked(k, v, !!c)} />
@@ -1855,35 +1898,52 @@ export default function PlanningPrototype() {
                       </div>
                     ) : null}
 
-                    {bdg.target?.scope === 'Статья' ? (
+                    {(!isArticleBreakdownWizard || bdg.step === 3) ? (
                       <div>
-                        <div className="text-sm font-semibold text-gray-900">Применить</div>
-                        <div className="mt-3 flex gap-2">
-                          <Button
-                            type="button"
-                            className={bdg.applyTo === 'only' ? ui.btnPrimary : ui.btnSecondary}
-                            onClick={() => setBdg((p) => ({ ...p, applyTo: 'only' }))}
-                          >
-                            Только эта статья
-                          </Button>
-                          <Button
-                            type="button"
-                            className={bdg.applyTo === 'section' ? ui.btnPrimary : ui.btnSecondary}
-                            onClick={() => setBdg((p) => ({ ...p, applyTo: 'section' }))}
-                          >
-                            Все статьи в разделе
-                          </Button>
-                        </div>
+                        <div className="text-sm font-semibold text-gray-900">Шаг 3. Подтверждение</div>
+                        {isArticleBreakdownWizard ? (
+                          <label className="mt-3 flex items-start gap-3 cursor-pointer">
+                            <Checkbox checked={bdg.confirmedOnlyArticle} onCheckedChange={(v) => setBdg((p) => ({ ...p, confirmedOnlyArticle: !!v }))} />
+                            <span className="text-sm text-gray-700">Подтверждаю: разрез применится только к выбранной статье.</span>
+                          </label>
+                        ) : (
+                          <div className="mt-2 text-sm text-gray-600">Разрез будет применен в рамках выбранной области.</div>
+                        )}
                       </div>
                     ) : null}
 
-                    <div className="pt-2 flex items-center justify-between">
-                      <Button type="button" className={ui.btnSecondary} onClick={closeBreakdownPanel}>
-                        Отменить
-                      </Button>
-                      <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown}>
-                        Применить
-                      </Button>
+                    <div className="pt-2 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {isArticleBreakdownWizard && bdg.step > 1 ? (
+                          <Button type="button" className={ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, step: (p.step - 1) as 1 | 2 | 3 }))}>
+                            Назад
+                          </Button>
+                        ) : null}
+                        <Button type="button" className={ui.btnSecondary} onClick={closeBreakdownPanel}>
+                          Отменить
+                        </Button>
+                      </div>
+
+                      {isArticleBreakdownWizard ? (
+                        bdg.step < 3 ? (
+                          <Button
+                            type="button"
+                            className={ui.btnPrimary}
+                            onClick={() => setBdg((p) => ({ ...p, step: (p.step + 1) as 1 | 2 | 3 }))}
+                            disabled={(bdg.step === 1 && !canProceedBreakdownStep1) || (bdg.step === 2 && !canProceedBreakdownStep2)}
+                          >
+                            Далее
+                          </Button>
+                        ) : (
+                          <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown} disabled={!bdg.confirmedOnlyArticle}>
+                            Применить
+                          </Button>
+                        )
+                      ) : (
+                        <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown}>
+                          Применить
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
