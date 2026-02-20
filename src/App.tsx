@@ -842,27 +842,7 @@ export default function PlanningPrototype() {
   };
 
   const setAnalyticsChecked = (k: AnalyticKey, checked: boolean) => {
-    setBdg((prev) => {
-      const analytics = checked
-        ? prev.analytics.includes(k)
-          ? prev.analytics
-          : [...prev.analytics, k]
-        : prev.analytics.filter((x) => x !== k);
-
-      const selectedValues = { ...prev.selectedValues };
-      if (checked && !selectedValues[k] && k !== 'Своя') {
-        const m: Record<string, boolean> = {};
-        for (const v of ANALYTIC_VALUES[k]) m[v] = true;
-        selectedValues[k] = m;
-      }
-
-      for (const existing of Object.keys(selectedValues) as AnalyticKey[]) {
-        if (!analytics.includes(existing)) delete selectedValues[existing];
-      }
-
-      const activeAnalytic = checked ? k : prev.activeAnalytic === k ? null : prev.activeAnalytic;
-      return { ...prev, analytics, selectedValues, activeAnalytic };
-    });
+    setBdg((prev) => ({ ...prev, activeAnalytic: checked ? k : null }));
   };
 
   const addDraftAnalytic = () => {
