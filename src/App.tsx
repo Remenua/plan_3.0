@@ -840,10 +840,14 @@ export default function PlanningPrototype() {
 
   const setAnalyticsChecked = (k: AnalyticKey, checked: boolean) => {
     setBdg((prev) => {
-      const analytics = checked ? [k] : prev.analytics.filter((x) => x !== k);
+      const analytics = checked
+        ? prev.analytics.includes(k)
+          ? prev.analytics
+          : [...prev.analytics, k]
+        : prev.analytics.filter((x) => x !== k);
 
       const selectedValues = { ...prev.selectedValues };
-      if (checked && !selectedValues[k]) {
+      if (checked && !selectedValues[k] && k !== 'Своя') {
         const m: Record<string, boolean> = {};
         for (const v of ANALYTIC_VALUES[k]) m[v] = true;
         selectedValues[k] = m;
@@ -1386,7 +1390,11 @@ export default function PlanningPrototype() {
 
   const selectedWizardAnalytic = bdg.analytics[0] as AnalyticKey | undefined;
   const canProceedBreakdownStep1 = bdg.analytics.length > 0;
-  const canProceedBreakdownStep2 = selectedWizardAnalytic ? (selectedWizardAnalytic === 'Своя' ? bdg.customSplitCount > 0 : Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean)) : false;
+  const canProceedBreakdownStep2 =
+    bdg.analytics.length > 0 &&
+    bdg.analytics.every((analytic) =>
+      analytic === 'Своя' ? bdg.customSplitCount > 0 : Object.values(bdg.selectedValues[analytic] ?? {}).some(Boolean),
+    );
 
   const dialogGrid = selectedPlan ? (gridByPlanId[selectedPlan.id] ?? []) : [];
   const selectedLineIdsList = Object.entries(bdg.selectedLineIds).filter(([, v]) => v).map(([k]) => Number(k));
@@ -1938,7 +1946,7 @@ export default function PlanningPrototype() {
                     {bdg.step === 1 ? (
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Шаг 1. Аналитика</div>
-                        <div className="mt-2 text-xs text-gray-600">Выберите один вид аналитики. На следующем шаге вы отметите, по каким значениям этой аналитики строить строки-комбинации.</div>
+                        <div className="mt-2 text-xs text-gray-600">Выберите одну или несколько аналитик. На следующем шаге вы зададите значения для каждой выбранной аналитики.</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {ANALYTICS.map((k) => {
                             const checked = bdg.analytics.includes(k);
@@ -1964,56 +1972,60 @@ export default function PlanningPrototype() {
                           <div className="mt-2 text-xs text-gray-600">Выберите значения аналитики, по которым будет построен разрез.</div>
                         </div>
 
-                        {selectedWizardAnalytic ? (
-                          selectedWizardAnalytic === 'Своя' ? (
-                            <div className="border rounded-lg p-3 space-y-2">
-                              <div className="text-sm font-semibold text-gray-900">Своя</div>
-                              <div className="text-xs text-gray-600">Укажите, на сколько строк разбить статью. Будут созданы «Значение 1», «Значение 2» и т.д., затем их можно переименовать в таблице.</div>
-                              <input
-                                type="number"
-                                min={1}
-                                max={50}
-                                value={bdg.customSplitCount}
-                                onChange={(e) => setBdg((p) => ({ ...p, customSplitCount: Math.max(1, Math.min(50, Number(e.target.value) || 1)) }))}
-                                className="w-full h-9 px-2 border rounded-md text-sm"
-                              />
-                            </div>
-                          ) : (
-                            <div className="border rounded-lg p-3">
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="text-sm font-semibold text-gray-900">{selectedWizardAnalytic}</div>
-                                <div className="flex items-center gap-2 text-xs">
-                                  <button
-                                    type="button"
-                                    className="text-gray-600 hover:text-gray-800"
-                                    onClick={() => {
-                                      for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, true);
-                                    }}
-                                  >
-                                    Выбрать все
-                                  </button>
-                                  <span className="text-gray-300">|</span>
-                                  <button
-                                    type="button"
-                                    className="text-gray-600 hover:text-gray-800"
-                                    onClick={() => {
-                                      for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, false);
-                                    }}
-                                  >
-                                    Снять
-                                  </button>
+                        {bdg.analytics.length > 0 ? (
+                          <div className="space-y-3">
+                            {bdg.analytics.map((analytic) =>
+                              analytic === 'Своя' ? (
+                                <div key={analytic} className="border rounded-lg p-3 space-y-2">
+                                  <div className="text-sm font-semibold text-gray-900">Своя</div>
+                                  <div className="text-xs text-gray-600">Укажите, на сколько строк разбить статью. Будут созданы «Значение 1», «Значение 2» и т.д., затем их можно переименовать в таблице.</div>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={50}
+                                    value={bdg.customSplitCount}
+                                    onChange={(e) => setBdg((p) => ({ ...p, customSplitCount: Math.max(1, Math.min(50, Number(e.target.value) || 1)) }))}
+                                    className="w-full h-9 px-2 border rounded-md text-sm"
+                                  />
                                 </div>
-                              </div>
-                              <div className="mt-2 max-h-72 overflow-auto space-y-2">
-                                {ANALYTIC_VALUES[selectedWizardAnalytic].map((v) => (
-                                  <label key={v} className="flex items-center gap-3 cursor-pointer">
-                                    <Checkbox checked={!!bdg.selectedValues[selectedWizardAnalytic]?.[v]} onCheckedChange={(c) => setValueChecked(selectedWizardAnalytic, v, !!c)} />
-                                    <span className="text-sm text-gray-800">{v}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          )
+                              ) : (
+                                <div key={analytic} className="border rounded-lg p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="text-sm font-semibold text-gray-900">{analytic}</div>
+                                    <div className="flex items-center gap-2 text-xs">
+                                      <button
+                                        type="button"
+                                        className="text-gray-600 hover:text-gray-800"
+                                        onClick={() => {
+                                          for (const v of ANALYTIC_VALUES[analytic]) setValueChecked(analytic, v, true);
+                                        }}
+                                      >
+                                        Выбрать все
+                                      </button>
+                                      <span className="text-gray-300">|</span>
+                                      <button
+                                        type="button"
+                                        className="text-gray-600 hover:text-gray-800"
+                                        onClick={() => {
+                                          for (const v of ANALYTIC_VALUES[analytic]) setValueChecked(analytic, v, false);
+                                        }}
+                                      >
+                                        Снять
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="mt-2 max-h-72 overflow-auto space-y-2">
+                                    {ANALYTIC_VALUES[analytic].map((v) => (
+                                      <label key={v} className="flex items-center gap-3 cursor-pointer">
+                                        <Checkbox checked={!!bdg.selectedValues[analytic]?.[v]} onCheckedChange={(c) => setValueChecked(analytic, v, !!c)} />
+                                        <span className="text-sm text-gray-800">{v}</span>
+                                      </label>
+                                    ))}
+                                  </div>
+                                </div>
+                              ),
+                            )}
+                          </div>
                         ) : null}
                       </div>
                     ) : null}
