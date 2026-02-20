@@ -1966,7 +1966,7 @@ export default function PlanningPrototype() {
                     {bdg.step === 1 ? (
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Шаг 1. Аналитика</div>
-                        <div className="mt-2 text-xs text-gray-600">Выберите одну аналитику для текущей настройки. Чтобы добавить вторую/третью, откройте мастер повторно.</div>
+                        <div className="mt-2 text-xs text-gray-600">Выберите аналитику для текущей настройки.</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           {ANALYTICS.map((k) => {
                             const checked = bdg.activeAnalytic === k;
@@ -1982,11 +1982,6 @@ export default function PlanningPrototype() {
                             );
                           })}
                         </div>
-                        {bdg.analytics.length > 0 ? (
-                          <div className="mt-3 text-xs text-gray-600">
-                            Уже добавлены: {bdg.analytics.join(', ')}
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
 
