@@ -1632,26 +1632,43 @@ export default function PlanningPrototype() {
                 </div>
 
                 <div className="mt-4 overflow-x-auto border rounded-lg">
-                  <table className="min-w-[1400px] w-full text-sm">
+                  <table className="min-w-[1400px] w-full text-sm table-fixed">
+                    <colgroup>
+                      <col style={{ width: 240 }} />
+                      {activeAnalyticColumns.map((a) => (
+                        <col key={`col-analytic-${a}`} style={{ width: 140 }} />
+                      ))}
+                      {periodColumns.map((p) => (
+                        <col key={`col-period-${p.key}`} style={{ width: 88 }} />
+                      ))}
+                      <col style={{ width: 120 }} />
+                      {showPrevYearFact ? (
+                        <>
+                          <col style={{ width: 120 }} />
+                          <col style={{ width: 120 }} />
+                          <col style={{ width: 120 }} />
+                        </>
+                      ) : null}
+                    </colgroup>
                     <thead>
                       <tr className="border-b bg-gray-50">
-                        <th className="p-2 text-left min-w-[240px]">Статья</th>
+                        <th className="p-2 text-left">Статья</th>
                         {activeAnalyticColumns.map((a) => (
-                          <th key={a} className="p-2 text-left min-w-[110px]">
+                          <th key={a} className="p-2 text-left">
                             {a}
                           </th>
                         ))}
                         {periodColumns.map((p) => (
-                          <th key={p.key} className="p-2 text-center min-w-[72px]">
+                          <th key={p.key} className="p-2 text-center">
                             {p.label}
                           </th>
                         ))}
-                        <th className="p-2 text-center min-w-[90px] font-semibold">Итого</th>
+                        <th className="p-2 text-center font-semibold">Итого</th>
                         {showPrevYearFact ? (
                           <>
-                            <th className="p-2 text-center min-w-[110px]">Факт ПГ</th>
-                            <th className="p-2 text-center min-w-[110px]">Откл. ₽</th>
-                            <th className="p-2 text-center min-w-[100px]">Откл. %</th>
+                            <th className="p-2 text-center">Факт ПГ</th>
+                            <th className="p-2 text-center">Откл. ₽</th>
+                            <th className="p-2 text-center">Откл. %</th>
                           </>
                         ) : null}
                       </tr>
