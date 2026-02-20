@@ -391,7 +391,7 @@ type AddArticlesDialogState = {
 type BreakdownDialogState = {
   open: boolean;
   target: BreakdownTarget | null;
-  applyTo: 'only' | 'section';
+  applyTo: 'only' | 'section' | 'plan';
   analytics: AnalyticKey[];
   valuesMode: 'all' | 'selected';
   selectedValues: Partial<Record<AnalyticKey, Record<string, boolean>>>;
@@ -796,28 +796,23 @@ export default function PlanningPrototype() {
       selectedValuesMap[k] = map;
     }
 
+    const defaultApplyTo: 'only' | 'section' | 'plan' = target.scope === 'План' ? 'plan' : target.scope === 'Раздел' ? 'section' : 'only';
+
     setBdg({
       open: true,
       target,
-      applyTo: 'only',
-      analytics: [...(current.analytics ?? [])],
+      applyTo: defaultApplyTo,
+      analytics: current.analytics.length ? [current.analytics[0]] : [],
       valuesMode: 'selected',
       selectedValues: selectedValuesMap,
-      step: target.scope === 'Статья' ? 1 : 3,
+      step: 1,
       confirmedOnlyArticle: false,
     });
   };
 
   const setAnalyticsChecked = (k: AnalyticKey, checked: boolean) => {
     setBdg((prev) => {
-      const isArticleTarget = prev.target?.scope === 'Статья';
-      const analytics = checked
-        ? isArticleTarget
-          ? [k]
-          : prev.analytics.includes(k)
-            ? prev.analytics
-            : [...prev.analytics, k]
-        : prev.analytics.filter((x) => x !== k);
+      const analytics = checked ? [k] : prev.analytics.filter((x) => x !== k);
 
       const selectedValues = { ...prev.selectedValues };
       if (checked && !selectedValues[k]) {
@@ -825,26 +820,12 @@ export default function PlanningPrototype() {
         for (const v of ANALYTIC_VALUES[k]) m[v] = true;
         selectedValues[k] = m;
       }
-      if (!checked) delete selectedValues[k];
 
-      if (checked && isArticleTarget) {
-        for (const existing of Object.keys(selectedValues) as AnalyticKey[]) {
-          if (existing !== k) delete selectedValues[existing];
-        }
+      for (const existing of Object.keys(selectedValues) as AnalyticKey[]) {
+        if (!analytics.includes(existing)) delete selectedValues[existing];
       }
 
       return { ...prev, analytics, selectedValues };
-    });
-  };
-
-  const moveAnalytic = (k: AnalyticKey, dir: -1 | 1) => {
-    setBdg((prev) => {
-      const idx = prev.analytics.indexOf(k);
-      const j = idx + dir;
-      if (idx < 0 || j < 0 || j >= prev.analytics.length) return prev;
-      const next = [...prev.analytics];
-      [next[idx], next[j]] = [next[j], next[idx]];
-      return { ...prev, analytics: next };
     });
   };
 
@@ -899,7 +880,6 @@ export default function PlanningPrototype() {
 
   const applyBreakdown = () => {
     if (!selectedPlan || !bdg.target) return;
-    if (bdg.target.scope === 'Статья' && !bdg.confirmedOnlyArticle) return;
     const nb = buildBreakdownFromDialog();
 
     const applyToLine = (ln: ArticleLine, eff: Breakdown): ArticleLine => {
@@ -907,29 +887,30 @@ export default function PlanningPrototype() {
       return { ...ln, breakdown: eff, combos: generateCombos(eff), isOpen: true };
     };
 
-    if (bdg.target.scope === 'План') {
-      setPlanBreakdownByPlanId((prev) => ({ ...prev, [selectedPlan.id]: nb }));
+    if (bdg.step !== 3) return;
 
+    if (bdg.applyTo === 'plan' || bdg.target.scope === 'План') {
+      setPlanBreakdownByPlanId((prev) => ({ ...prev, [selectedPlan.id]: nb }));
       updateGrid(selectedPlan.id, (cur) =>
         cur.map((s) => ({
           ...s,
-          lines: s.lines.map((ln) => (ln.breakdown ? ln : applyToLine(ln, nb))),
+          breakdown: nb.analytics.length ? nb : undefined,
+          lines: s.lines.map((ln) => applyToLine(ln, nb)),
         })),
       );
-
       closeBreakdownPanel();
       return;
     }
 
-    if (bdg.target.scope === 'Раздел') {
-      const sectionId = bdg.target.sectionId;
+    if (bdg.applyTo === 'section' || bdg.target.scope === 'Раздел') {
+      const sectionId = bdg.target.scope === 'Статья' ? bdg.target.sectionId : bdg.target.sectionId;
       updateGrid(selectedPlan.id, (cur) =>
         cur.map((s) => {
           if (s.id !== sectionId) return s;
-          const nextSection: Section = { ...s, breakdown: nb.analytics.length ? nb : undefined };
           return {
-            ...nextSection,
-            lines: nextSection.lines.map((ln) => (ln.breakdown ? ln : applyToLine(ln, nb))),
+            ...s,
+            breakdown: nb.analytics.length ? nb : undefined,
+            lines: s.lines.map((ln) => applyToLine(ln, nb)),
           };
         }),
       );
@@ -1293,10 +1274,13 @@ export default function PlanningPrototype() {
     setSelectedPlanId(id);
   };
 
-  const isArticleBreakdownWizard = bdg.target?.scope === 'Статья';
   const selectedWizardAnalytic = bdg.analytics[0] as AnalyticKey | undefined;
-  const canProceedBreakdownStep1 = !isArticleBreakdownWizard || bdg.analytics.length > 0;
-  const canProceedBreakdownStep2 = !isArticleBreakdownWizard || (selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false);
+  const canProceedBreakdownStep1 = bdg.analytics.length > 0;
+  const canProceedBreakdownStep2 = selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false;
+  const canApplyBreakdown = bdg.step === 3 && (bdg.applyTo !== 'only' || bdg.target?.scope !== 'Статья' || bdg.confirmedOnlyArticle);
+
+  const applyToLabel =
+    bdg.applyTo === 'plan' ? 'все статьи плана' : bdg.applyTo === 'section' ? 'все статьи выбранного раздела' : 'только выбранная статья';
 
   return (
     <div className={ui.page}>
@@ -1800,75 +1784,45 @@ export default function PlanningPrototype() {
                   </div>
 
                   <div className="p-5 space-y-6 overflow-auto h-[calc(100%-64px)]">
-                    {isArticleBreakdownWizard ? (
-                      <div className="rounded-lg border bg-gray-50 p-3 text-xs text-gray-600">
-                        Шаг {bdg.step} из 3
-                      </div>
-                    ) : null}
+                    <div className="rounded-lg border bg-gray-50 p-3 text-xs text-gray-600">
+                      Шаг {bdg.step} из 3
+                    </div>
 
-                    {(!isArticleBreakdownWizard || bdg.step === 1) ? (
+                    {bdg.step === 1 ? (
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Шаг 1. Аналитика</div>
-                        <div className="mt-2 text-xs text-gray-500">
-                          {isArticleBreakdownWizard ? 'Выберите одну аналитику, по которой нужно разбить выбранную статью.' : 'Выберите аналитики и их порядок.'}
-                        </div>
+                        <div className="mt-2 text-xs text-gray-500">Выберите один вид аналитики, по которому нужно разбить данные.</div>
                         <div className="mt-3 space-y-2">
                           {ANALYTICS.map((k) => {
                             const checked = bdg.analytics.includes(k);
                             return (
-                              <div key={k} className="flex items-center justify-between gap-2">
-                                <label className="flex items-center gap-3 cursor-pointer">
-                                  <Checkbox checked={checked} onCheckedChange={(v) => setAnalyticsChecked(k, !!v)} />
-                                  <span className="text-sm text-gray-900">{k}</span>
-                                </label>
-                                {!isArticleBreakdownWizard ? (
-                                  <div className="flex items-center gap-1">
-                                    <Button
-                                      type="button"
-                                      className={`${ui.btnSecondary} w-8 h-8 px-0`}
-                                      onClick={() => moveAnalytic(k, -1)}
-                                      disabled={!checked}
-                                      title="Вверх"
-                                    >
-                                      ↑
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      className={`${ui.btnSecondary} w-8 h-8 px-0`}
-                                      onClick={() => moveAnalytic(k, +1)}
-                                      disabled={!checked}
-                                      title="Вниз"
-                                    >
-                                      ↓
-                                    </Button>
-                                  </div>
-                                ) : null}
-                              </div>
+                              <label key={k} className="flex items-center gap-3 cursor-pointer">
+                                <Checkbox checked={checked} onCheckedChange={(v) => setAnalyticsChecked(k, !!v)} />
+                                <span className="text-sm text-gray-900">{k}</span>
+                              </label>
                             );
                           })}
                         </div>
                       </div>
                     ) : null}
 
-                    {(!isArticleBreakdownWizard || bdg.step === 2) ? (
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">Шаг 2. Значения</div>
-                        <div className="mt-2 text-xs text-gray-500">Для выбранной аналитики отметьте нужные значения. По умолчанию выбраны все значения.</div>
-                      </div>
-                    ) : null}
+                    {bdg.step === 2 ? (
+                      <>
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900">Шаг 2. Значения</div>
+                          <div className="mt-2 text-xs text-gray-500">Выберите значения аналитики, по которым будет построен разрез.</div>
+                        </div>
 
-                    {(!isArticleBreakdownWizard || bdg.step === 2) && bdg.analytics.length > 0 ? (
-                      <div className="space-y-4">
-                        {(isArticleBreakdownWizard ? bdg.analytics.slice(0, 1) : bdg.analytics).map((k) => (
-                          <div key={k} className="border rounded-lg p-3">
+                        {selectedWizardAnalytic ? (
+                          <div className="border rounded-lg p-3">
                             <div className="flex items-center justify-between gap-2">
-                              <div className="text-sm font-semibold text-gray-900">{k}</div>
+                              <div className="text-sm font-semibold text-gray-900">{selectedWizardAnalytic}</div>
                               <div className="flex items-center gap-2 text-xs">
                                 <button
                                   type="button"
                                   className="text-gray-600 hover:text-gray-800"
                                   onClick={() => {
-                                    for (const v of ANALYTIC_VALUES[k]) setValueChecked(k, v, true);
+                                    for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, true);
                                   }}
                                 >
                                   Выбрать все
@@ -1878,7 +1832,7 @@ export default function PlanningPrototype() {
                                   type="button"
                                   className="text-gray-600 hover:text-gray-800"
                                   onClick={() => {
-                                    for (const v of ANALYTIC_VALUES[k]) setValueChecked(k, v, false);
+                                    for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, false);
                                   }}
                                 >
                                   Снять
@@ -1886,35 +1840,52 @@ export default function PlanningPrototype() {
                               </div>
                             </div>
                             <div className="mt-2 max-h-64 overflow-auto space-y-2">
-                              {ANALYTIC_VALUES[k].map((v) => (
+                              {ANALYTIC_VALUES[selectedWizardAnalytic].map((v) => (
                                 <label key={v} className="flex items-center gap-3 cursor-pointer">
-                                  <Checkbox checked={!!bdg.selectedValues[k]?.[v]} onCheckedChange={(c) => setValueChecked(k, v, !!c)} />
+                                  <Checkbox checked={!!bdg.selectedValues[selectedWizardAnalytic]?.[v]} onCheckedChange={(c) => setValueChecked(selectedWizardAnalytic, v, !!c)} />
                                   <span className="text-sm text-gray-800">{v}</span>
                                 </label>
                               ))}
                             </div>
                           </div>
-                        ))}
-                      </div>
+                        ) : null}
+                      </>
                     ) : null}
 
-                    {(!isArticleBreakdownWizard || bdg.step === 3) ? (
+                    {bdg.step === 3 ? (
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Шаг 3. Подтверждение</div>
-                        {isArticleBreakdownWizard ? (
+                        <div className="mt-2 text-sm text-gray-700">Сейчас разрез будет применён на: <span className="font-semibold">{applyToLabel}</span>.</div>
+                        <div className="mt-3 space-y-2">
+                          {bdg.target?.scope === 'Статья' ? (
+                            <Button type="button" className={bdg.applyTo === 'only' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'only' }))}>
+                              Только выбранная статья
+                            </Button>
+                          ) : null}
+
+                          {bdg.target?.scope !== 'План' ? (
+                            <Button type="button" className={bdg.applyTo === 'section' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'section' }))}>
+                              Все статьи выбранного раздела
+                            </Button>
+                          ) : null}
+
+                          <Button type="button" className={bdg.applyTo === 'plan' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'plan' }))}>
+                            Все статьи плана
+                          </Button>
+                        </div>
+
+                        {bdg.target?.scope === 'Статья' && bdg.applyTo === 'only' ? (
                           <label className="mt-3 flex items-start gap-3 cursor-pointer">
                             <Checkbox checked={bdg.confirmedOnlyArticle} onCheckedChange={(v) => setBdg((p) => ({ ...p, confirmedOnlyArticle: !!v }))} />
                             <span className="text-sm text-gray-700">Подтверждаю: разрез применится только к выбранной статье.</span>
                           </label>
-                        ) : (
-                          <div className="mt-2 text-sm text-gray-600">Разрез будет применен в рамках выбранной области.</div>
-                        )}
+                        ) : null}
                       </div>
                     ) : null}
 
                     <div className="pt-2 flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        {isArticleBreakdownWizard && bdg.step > 1 ? (
+                        {bdg.step > 1 ? (
                           <Button type="button" className={ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, step: (p.step - 1) as 1 | 2 | 3 }))}>
                             Назад
                           </Button>
@@ -1924,23 +1895,17 @@ export default function PlanningPrototype() {
                         </Button>
                       </div>
 
-                      {isArticleBreakdownWizard ? (
-                        bdg.step < 3 ? (
-                          <Button
-                            type="button"
-                            className={ui.btnPrimary}
-                            onClick={() => setBdg((p) => ({ ...p, step: (p.step + 1) as 1 | 2 | 3 }))}
-                            disabled={(bdg.step === 1 && !canProceedBreakdownStep1) || (bdg.step === 2 && !canProceedBreakdownStep2)}
-                          >
-                            Далее
-                          </Button>
-                        ) : (
-                          <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown} disabled={!bdg.confirmedOnlyArticle}>
-                            Применить
-                          </Button>
-                        )
+                      {bdg.step < 3 ? (
+                        <Button
+                          type="button"
+                          className={ui.btnPrimary}
+                          onClick={() => setBdg((p) => ({ ...p, step: (p.step + 1) as 1 | 2 | 3 }))}
+                          disabled={(bdg.step === 1 && !canProceedBreakdownStep1) || (bdg.step === 2 && !canProceedBreakdownStep2)}
+                        >
+                          Далее
+                        </Button>
                       ) : (
-                        <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown}>
+                        <Button type="button" className={ui.btnPrimary} onClick={applyBreakdown} disabled={!canApplyBreakdown}>
                           Применить
                         </Button>
                       )}
