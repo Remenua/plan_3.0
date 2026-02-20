@@ -1279,8 +1279,17 @@ export default function PlanningPrototype() {
   const canProceedBreakdownStep2 = selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false;
   const canApplyBreakdown = bdg.step === 3 && (bdg.applyTo !== 'only' || bdg.target?.scope !== 'Статья' || bdg.confirmedOnlyArticle);
 
+  const dialogGrid = selectedPlan ? (gridByPlanId[selectedPlan.id] ?? []) : [];
+  const targetSectionId = bdg.target?.scope === 'План' ? null : bdg.target?.sectionId;
+  const targetSection = targetSectionId ? dialogGrid.find((s) => s.id === targetSectionId) : null;
+  const targetLine = bdg.target?.scope === 'Статья' ? targetSection?.lines.find((ln) => ln.id === bdg.target?.lineId) : null;
+
   const applyToLabel =
-    bdg.applyTo === 'plan' ? 'все статьи плана' : bdg.applyTo === 'section' ? 'все статьи выбранного раздела' : 'только выбранная статья';
+    bdg.applyTo === 'plan'
+      ? 'все статьи плана'
+      : bdg.applyTo === 'section'
+        ? `все статьи раздела «${targetSection?.name ?? '—'}»`
+        : `только статья «${targetLine?.name ?? '—'}»`;
 
   return (
     <div className={ui.page}>
@@ -1776,14 +1785,14 @@ export default function PlanningPrototype() {
                   <div className="p-5 border-b flex items-start justify-between gap-3">
                     <div>
                       <div className="text-lg font-semibold">Аналитики (разрезы)</div>
-                      <div className="text-sm text-gray-500 mt-1">Выбери аналитики и значения — появятся строки-комбинации.</div>
+                      <div className="text-sm text-gray-500 mt-1">Мастер в 3 шага: сначала выбери одну аналитику, затем её значения, затем область применения разреза.</div>
                     </div>
                     <button type="button" className={ui.close} onClick={closeBreakdownPanel}>
                       × Закрыть
                     </button>
                   </div>
 
-                  <div className="p-5 space-y-6 overflow-auto h-[calc(100%-64px)]">
+                  <div className="p-5 space-y-4 overflow-auto h-[calc(100%-64px)]">
                     <div className="rounded-lg border bg-gray-50 p-3 text-xs text-gray-600">
                       Шаг {bdg.step} из 3
                     </div>
@@ -1791,15 +1800,19 @@ export default function PlanningPrototype() {
                     {bdg.step === 1 ? (
                       <div>
                         <div className="text-sm font-semibold text-gray-900">Шаг 1. Аналитика</div>
-                        <div className="mt-2 text-xs text-gray-500">Выберите один вид аналитики, по которому нужно разбить данные.</div>
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-2 text-xs text-gray-600">Выберите один вид аналитики. На следующем шаге вы отметите, по каким значениям этой аналитики строить строки-комбинации.</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
                           {ANALYTICS.map((k) => {
                             const checked = bdg.analytics.includes(k);
                             return (
-                              <label key={k} className="flex items-center gap-3 cursor-pointer">
-                                <Checkbox checked={checked} onCheckedChange={(v) => setAnalyticsChecked(k, !!v)} />
-                                <span className="text-sm text-gray-900">{k}</span>
-                              </label>
+                              <button
+                                key={k}
+                                type="button"
+                                onClick={() => setAnalyticsChecked(k, !checked)}
+                                className={`h-8 px-3 rounded-full border text-sm ${checked ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                              >
+                                {k}
+                              </button>
                             );
                           })}
                         </div>
@@ -1807,10 +1820,10 @@ export default function PlanningPrototype() {
                     ) : null}
 
                     {bdg.step === 2 ? (
-                      <>
+                      <div className="space-y-3">
                         <div>
                           <div className="text-sm font-semibold text-gray-900">Шаг 2. Значения</div>
-                          <div className="mt-2 text-xs text-gray-500">Выберите значения аналитики, по которым будет построен разрез.</div>
+                          <div className="mt-2 text-xs text-gray-600">Выберите значения аналитики, по которым будет построен разрез.</div>
                         </div>
 
                         {selectedWizardAnalytic ? (
@@ -1839,7 +1852,7 @@ export default function PlanningPrototype() {
                                 </button>
                               </div>
                             </div>
-                            <div className="mt-2 max-h-64 overflow-auto space-y-2">
+                            <div className="mt-2 max-h-72 overflow-auto space-y-2">
                               {ANALYTIC_VALUES[selectedWizardAnalytic].map((v) => (
                                 <label key={v} className="flex items-center gap-3 cursor-pointer">
                                   <Checkbox checked={!!bdg.selectedValues[selectedWizardAnalytic]?.[v]} onCheckedChange={(c) => setValueChecked(selectedWizardAnalytic, v, !!c)} />
@@ -1849,33 +1862,57 @@ export default function PlanningPrototype() {
                             </div>
                           </div>
                         ) : null}
-                      </>
+                      </div>
                     ) : null}
 
                     {bdg.step === 3 ? (
-                      <div>
-                        <div className="text-sm font-semibold text-gray-900">Шаг 3. Подтверждение</div>
-                        <div className="mt-2 text-sm text-gray-700">Сейчас разрез будет применён на: <span className="font-semibold">{applyToLabel}</span>.</div>
-                        <div className="mt-3 space-y-2">
-                          {bdg.target?.scope === 'Статья' ? (
-                            <Button type="button" className={bdg.applyTo === 'only' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'only' }))}>
-                              Только выбранная статья
-                            </Button>
-                          ) : null}
+                      <div className="space-y-3">
+                        <div>
+                          <div className="text-sm font-semibold text-gray-900">Шаг 3. Подтверждение</div>
+                          <div className="mt-2 text-sm text-gray-700">Сейчас разрез будет применён на: <span className="font-semibold">{applyToLabel}</span>.</div>
+                        </div>
 
-                          {bdg.target?.scope !== 'План' ? (
-                            <Button type="button" className={bdg.applyTo === 'section' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'section' }))}>
-                              Все статьи выбранного раздела
-                            </Button>
-                          ) : null}
+                        <div className="border rounded-lg p-3 text-sm text-gray-800 space-y-2">
+                          <button
+                            type="button"
+                            className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'plan' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
+                            onClick={() => setBdg((p) => ({ ...p, applyTo: 'plan', confirmedOnlyArticle: false }))}
+                          >
+                            <span>{bdg.applyTo === 'plan' ? '☑' : '☐'}</span>
+                            <span>План → все статьи</span>
+                          </button>
 
-                          <Button type="button" className={bdg.applyTo === 'plan' ? ui.btnPrimary : ui.btnSecondary} onClick={() => setBdg((p) => ({ ...p, applyTo: 'plan' }))}>
-                            Все статьи плана
-                          </Button>
+                          {targetSection ? (
+                            <div className="pl-4 space-y-1">
+                              <button
+                                type="button"
+                                className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'section' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
+                                onClick={() => setBdg((p) => ({ ...p, applyTo: 'section', confirmedOnlyArticle: false }))}
+                              >
+                                <span className="text-blue-600">⊕</span>
+                                <span>{bdg.applyTo === 'section' ? '☑' : '☐'}</span>
+                                <span>Раздел «{targetSection.name}»</span>
+                              </button>
+
+                              <div className="pl-6 space-y-1">
+                                <div className="text-xs text-gray-500">Папка: статьи раздела</div>
+                                {bdg.target?.scope === 'Статья' && targetLine ? (
+                                  <button
+                                    type="button"
+                                    className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'only' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
+                                    onClick={() => setBdg((p) => ({ ...p, applyTo: 'only' }))}
+                                  >
+                                    <span>{bdg.applyTo === 'only' ? '☑' : '☐'}</span>
+                                    <span>Статья «{targetLine.name}»</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
 
                         {bdg.target?.scope === 'Статья' && bdg.applyTo === 'only' ? (
-                          <label className="mt-3 flex items-start gap-3 cursor-pointer">
+                          <label className="flex items-start gap-3 cursor-pointer">
                             <Checkbox checked={bdg.confirmedOnlyArticle} onCheckedChange={(v) => setBdg((p) => ({ ...p, confirmedOnlyArticle: !!v }))} />
                             <span className="text-sm text-gray-700">Подтверждаю: разрез применится только к выбранной статье.</span>
                           </label>
@@ -1890,9 +1927,6 @@ export default function PlanningPrototype() {
                             Назад
                           </Button>
                         ) : null}
-                        <Button type="button" className={ui.btnSecondary} onClick={closeBreakdownPanel}>
-                          Отменить
-                        </Button>
                       </div>
 
                       {bdg.step < 3 ? (
