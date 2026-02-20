@@ -161,8 +161,8 @@ function buildPeriodColumns(step: TableStep, fromISO: string, toISOValue: string
   return cols.length ? cols : MONTH_COLUMNS;
 }
 
-type AnalyticKey = 'Проект' | 'Номенклатура' | 'Организация' | 'ЦФО';
-const ANALYTICS: AnalyticKey[] = ['Проект', 'Организация', 'ЦФО', 'Номенклатура'];
+type AnalyticKey = 'Проект' | 'Номенклатура' | 'Организация' | 'ЦФО' | 'Договор' | 'Контрагент' | 'Своя';
+const ANALYTICS: AnalyticKey[] = ['Проект', 'Организация', 'ЦФО', 'Номенклатура', 'Договор', 'Контрагент', 'Своя'];
 
 const PROJECT_PREFIXES = ['ЖК Северный', 'ЖК Центральный', 'ЖК Южный', 'ЖК Парковый', 'ЖК Речной', 'ЖК Лесной', 'ЖК Солнечный', 'ЖК Город'];
 const PROJECT_NAMES = Array.from({ length: 100 }, (_, i) => {
@@ -183,6 +183,9 @@ const ANALYTIC_VALUES: Record<AnalyticKey, string[]> = {
   Организация: ['ООО Ромашка Девелопмент', 'ООО Василек Строй', 'ООО СК Альфа'],
   ЦФО: ['Девелопмент', 'СМР', 'Снабжение', 'Продажи', 'Маркетинг', 'ИТ', 'Финансы', 'Юридический блок', 'Администрация', 'Сервис'],
   Номенклатура: NOMENCLATURE_ITEMS,
+  Договор: ['Договор №01/24', 'Договор №02/24', 'Договор №03/24', 'Договор №04/24', 'Договор №05/24'],
+  Контрагент: ['ООО Монолит', 'ООО ИнвестПром', 'ООО ТехСнаб', 'ИП Кузнецов', 'АО СтройГрупп'],
+  Своя: ['Да', 'Нет'],
 };
 
 type Breakdown = {
@@ -397,6 +400,8 @@ type BreakdownDialogState = {
   selectedValues: Partial<Record<AnalyticKey, Record<string, boolean>>>;
   step: 1 | 2 | 3;
   confirmedOnlyArticle: boolean;
+  expandedSections: Record<number, boolean>;
+  selectedLineIds: Record<number, boolean>;
 };
 
 
@@ -768,6 +773,8 @@ export default function PlanningPrototype() {
     selectedValues: {},
     step: 1,
     confirmedOnlyArticle: false,
+    expandedSections: {},
+    selectedLineIds: {},
   });
 
   const closeBreakdownPanel = () => setBdg((p) => ({ ...p, open: false, target: null }));
@@ -798,6 +805,19 @@ export default function PlanningPrototype() {
 
     const defaultApplyTo: 'only' | 'section' | 'plan' = target.scope === 'План' ? 'plan' : target.scope === 'Раздел' ? 'section' : 'only';
 
+    const expandedSections: Record<number, boolean> = {};
+    for (const s of currentGrid) expandedSections[s.id] = target.scope !== 'План' ? s.id === target.sectionId : false;
+
+    const selectedLineIds: Record<number, boolean> = {};
+    if (target.scope === 'План') {
+      for (const s of currentGrid) for (const ln of s.lines) selectedLineIds[ln.id] = true;
+    } else if (target.scope === 'Раздел') {
+      const sec = currentGrid.find((s) => s.id === target.sectionId);
+      for (const ln of sec?.lines ?? []) selectedLineIds[ln.id] = true;
+    } else if (target.scope === 'Статья') {
+      selectedLineIds[target.lineId] = true;
+    }
+
     setBdg({
       open: true,
       target,
@@ -807,6 +827,8 @@ export default function PlanningPrototype() {
       selectedValues: selectedValuesMap,
       step: 1,
       confirmedOnlyArticle: false,
+      expandedSections,
+      selectedLineIds,
     });
   };
 
@@ -837,6 +859,28 @@ export default function PlanningPrototype() {
         [k]: { ...(prev.selectedValues[k] ?? {}), [value]: checked },
       },
     }));
+  };
+
+  const toggleSectionExpand = (sectionId: number) => {
+    setBdg((prev) => ({
+      ...prev,
+      expandedSections: { ...prev.expandedSections, [sectionId]: !prev.expandedSections[sectionId] },
+    }));
+  };
+
+  const setLineSelected = (lineId: number, checked: boolean) => {
+    setBdg((prev) => ({
+      ...prev,
+      selectedLineIds: { ...prev.selectedLineIds, [lineId]: checked },
+    }));
+  };
+
+  const setSectionLinesSelected = (section: Section, checked: boolean) => {
+    setBdg((prev) => {
+      const selectedLineIds = { ...prev.selectedLineIds };
+      for (const ln of section.lines) selectedLineIds[ln.id] = checked;
+      return { ...prev, selectedLineIds };
+    });
   };
 
   const buildBreakdownFromDialog = (): Breakdown => {
@@ -889,51 +933,17 @@ export default function PlanningPrototype() {
 
     if (bdg.step !== 3) return;
 
-    if (bdg.applyTo === 'plan' || bdg.target.scope === 'План') {
-      setPlanBreakdownByPlanId((prev) => ({ ...prev, [selectedPlan.id]: nb }));
-      updateGrid(selectedPlan.id, (cur) =>
-        cur.map((s) => ({
-          ...s,
-          breakdown: nb.analytics.length ? nb : undefined,
-          lines: s.lines.map((ln) => applyToLine(ln, nb)),
-        })),
-      );
-      closeBreakdownPanel();
-      return;
-    }
+    const selectedLineIds = new Set<number>(Object.entries(bdg.selectedLineIds).filter(([, v]) => v).map(([k]) => Number(k)));
+    if (selectedLineIds.size === 0) return;
 
-    if (bdg.applyTo === 'section' || bdg.target.scope === 'Раздел') {
-      const sectionId = bdg.target.scope === 'Статья' ? bdg.target.sectionId : bdg.target.sectionId;
-      updateGrid(selectedPlan.id, (cur) =>
-        cur.map((s) => {
-          if (s.id !== sectionId) return s;
-          return {
-            ...s,
-            breakdown: nb.analytics.length ? nb : undefined,
-            lines: s.lines.map((ln) => applyToLine(ln, nb)),
-          };
-        }),
-      );
-      closeBreakdownPanel();
-      return;
-    }
+    updateGrid(selectedPlan.id, (cur) =>
+      cur.map((s) => ({
+        ...s,
+        lines: s.lines.map((ln) => (selectedLineIds.has(ln.id) ? applyToLine(ln, nb) : ln)),
+      })),
+    );
 
-    if (bdg.target.scope === 'Статья') {
-      const { sectionId, lineId } = bdg.target;
-      updateGrid(selectedPlan.id, (cur) =>
-        cur.map((s) => {
-          if (s.id !== sectionId) return s;
-          return {
-            ...s,
-            lines: s.lines.map((ln) => {
-              if (ln.id !== lineId) return ln;
-              return applyToLine(ln, nb);
-            }),
-          };
-        }),
-      );
-      closeBreakdownPanel();
-    }
+    closeBreakdownPanel();
   };
 
   const addCombo = (sectionId: number, lineId: number) => {
@@ -1277,19 +1287,24 @@ export default function PlanningPrototype() {
   const selectedWizardAnalytic = bdg.analytics[0] as AnalyticKey | undefined;
   const canProceedBreakdownStep1 = bdg.analytics.length > 0;
   const canProceedBreakdownStep2 = selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false;
-  const canApplyBreakdown = bdg.step === 3 && (bdg.applyTo !== 'only' || bdg.target?.scope !== 'Статья' || bdg.confirmedOnlyArticle);
 
   const dialogGrid = selectedPlan ? (gridByPlanId[selectedPlan.id] ?? []) : [];
-  const targetSectionId = bdg.target?.scope === 'План' ? null : bdg.target?.sectionId;
-  const targetSection = targetSectionId ? dialogGrid.find((s) => s.id === targetSectionId) : null;
-  const targetLine = bdg.target?.scope === 'Статья' ? targetSection?.lines.find((ln) => ln.id === bdg.target?.lineId) : null;
+  const selectedLineIdsList = Object.entries(bdg.selectedLineIds).filter(([, v]) => v).map(([k]) => Number(k));
+  const selectedLineIdsSet = new Set<number>(selectedLineIdsList);
+  const canApplyBreakdown = bdg.step === 3 && selectedLineIdsList.length > 0;
+
+  const selectedSections = dialogGrid
+    .filter((s) => s.lines.some((ln) => selectedLineIdsSet.has(ln.id)))
+    .map((s) => s.name);
 
   const applyToLabel =
-    bdg.applyTo === 'plan'
-      ? 'все статьи плана'
-      : bdg.applyTo === 'section'
-        ? `все статьи раздела «${targetSection?.name ?? '—'}»`
-        : `только статья «${targetLine?.name ?? '—'}»`;
+    selectedLineIdsList.length === 0
+      ? 'ничего не выбрано'
+      : selectedSections.length === dialogGrid.length
+        ? 'все статьи всех разделов'
+        : selectedSections.length === 1
+          ? `статьи раздела «${selectedSections[0]}»`
+          : `${selectedLineIdsList.length} статей в ${selectedSections.length} разделах`;
 
   return (
     <div className={ui.page}>
@@ -1869,54 +1884,39 @@ export default function PlanningPrototype() {
                       <div className="space-y-3">
                         <div>
                           <div className="text-sm font-semibold text-gray-900">Шаг 3. Подтверждение</div>
-                          <div className="mt-2 text-sm text-gray-700">Сейчас разрез будет применён на: <span className="font-semibold">{applyToLabel}</span>.</div>
+                          <div className="mt-2 text-sm text-gray-700">Выбрано для применения: <span className="font-semibold">{applyToLabel}</span>.</div>
+                          <div className="mt-1 text-xs text-gray-500">Раскрой раздел через «+» и отметь чекбоксами нужные статьи в любых разделах.</div>
                         </div>
 
-                        <div className="border rounded-lg p-3 text-sm text-gray-800 space-y-2">
-                          <button
-                            type="button"
-                            className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'plan' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
-                            onClick={() => setBdg((p) => ({ ...p, applyTo: 'plan', confirmedOnlyArticle: false }))}
-                          >
-                            <span>{bdg.applyTo === 'plan' ? '☑' : '☐'}</span>
-                            <span>План → все статьи</span>
-                          </button>
-
-                          {targetSection ? (
-                            <div className="pl-4 space-y-1">
-                              <button
-                                type="button"
-                                className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'section' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
-                                onClick={() => setBdg((p) => ({ ...p, applyTo: 'section', confirmedOnlyArticle: false }))}
-                              >
-                                <span className="text-blue-600">⊕</span>
-                                <span>{bdg.applyTo === 'section' ? '☑' : '☐'}</span>
-                                <span>Раздел «{targetSection.name}»</span>
-                              </button>
-
-                              <div className="pl-6 space-y-1">
-                                <div className="text-xs text-gray-500">Папка: статьи раздела</div>
-                                {bdg.target?.scope === 'Статья' && targetLine ? (
-                                  <button
-                                    type="button"
-                                    className={`w-full text-left flex items-center gap-2 rounded px-2 py-1 ${bdg.applyTo === 'only' ? 'bg-amber-100' : 'hover:bg-gray-50'}`}
-                                    onClick={() => setBdg((p) => ({ ...p, applyTo: 'only' }))}
-                                  >
-                                    <span>{bdg.applyTo === 'only' ? '☑' : '☐'}</span>
-                                    <span>Статья «{targetLine.name}»</span>
+                        <div className="border rounded-lg p-3 text-sm text-gray-800 space-y-1 max-h-72 overflow-auto">
+                          {dialogGrid.map((section) => {
+                            const selectedInSection = section.lines.filter((ln) => !!bdg.selectedLineIds[ln.id]).length;
+                            const allInSection = section.lines.length > 0 && selectedInSection === section.lines.length;
+                            return (
+                              <div key={section.id} className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <button type="button" className="w-5 text-blue-600" onClick={() => toggleSectionExpand(section.id)}>
+                                    {bdg.expandedSections[section.id] ? '−' : '+'}
                                   </button>
+                                  <Checkbox checked={allInSection} onCheckedChange={(v) => setSectionLinesSelected(section, !!v)} />
+                                  <span className="font-medium">{section.name}</span>
+                                  <span className="text-xs text-gray-500">({selectedInSection}/{section.lines.length})</span>
+                                </div>
+
+                                {bdg.expandedSections[section.id] ? (
+                                  <div className="pl-7 space-y-1">
+                                    {section.lines.map((ln) => (
+                                      <label key={ln.id} className="flex items-center gap-2 cursor-pointer">
+                                        <Checkbox checked={!!bdg.selectedLineIds[ln.id]} onCheckedChange={(v) => setLineSelected(ln.id, !!v)} />
+                                        <span>{ln.name}</span>
+                                      </label>
+                                    ))}
+                                  </div>
                                 ) : null}
                               </div>
-                            </div>
-                          ) : null}
+                            );
+                          })}
                         </div>
-
-                        {bdg.target?.scope === 'Статья' && bdg.applyTo === 'only' ? (
-                          <label className="flex items-start gap-3 cursor-pointer">
-                            <Checkbox checked={bdg.confirmedOnlyArticle} onCheckedChange={(v) => setBdg((p) => ({ ...p, confirmedOnlyArticle: !!v }))} />
-                            <span className="text-sm text-gray-700">Подтверждаю: разрез применится только к выбранной статье.</span>
-                          </label>
-                        ) : null}
                       </div>
                     ) : null}
 
