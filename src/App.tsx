@@ -185,7 +185,7 @@ const ANALYTIC_VALUES: Record<AnalyticKey, string[]> = {
   Номенклатура: NOMENCLATURE_ITEMS,
   Договор: ['Договор №01/24', 'Договор №02/24', 'Договор №03/24', 'Договор №04/24', 'Договор №05/24'],
   Контрагент: ['ООО Монолит', 'ООО ИнвестПром', 'ООО ТехСнаб', 'ИП Кузнецов', 'АО СтройГрупп'],
-  Своя: ['Да', 'Нет'],
+  Своя: ['Значение 1'],
 };
 
 type Breakdown = {
@@ -402,6 +402,7 @@ type BreakdownDialogState = {
   confirmedOnlyArticle: boolean;
   expandedSections: Record<number, boolean>;
   selectedLineIds: Record<number, boolean>;
+  customSplitCount: number;
 };
 
 
@@ -498,6 +499,9 @@ export default function PlanningPrototype() {
   const periodColumns = useMemo(() => buildPeriodColumns(tableStep, periodFrom, periodTo), [tableStep, periodFrom, periodTo]);
   const [editingCell, setEditingCell] = useState<{ sectionId: number; lineId: number; comboId?: number; key: PeriodKey } | null>(null);
   const [editingValue, setEditingValue] = useState<string>('');
+  const [editingDimCell, setEditingDimCell] = useState<{ sectionId: number; lineId: number; comboId: number; analytic: AnalyticKey } | null>(null);
+  const [editingDimValue, setEditingDimValue] = useState<string>('');
+  const [hoverAnalyticColumn, setHoverAnalyticColumn] = useState<AnalyticKey | null>(null);
   const [isPeriodPickerOpen, setIsPeriodPickerOpen] = useState<boolean>(false);
   const [showPrevYearFact, setShowPrevYearFact] = useState<boolean>(false);
 
@@ -775,6 +779,7 @@ export default function PlanningPrototype() {
     confirmedOnlyArticle: false,
     expandedSections: {},
     selectedLineIds: {},
+    customSplitCount: 2,
   });
 
   const closeBreakdownPanel = () => setBdg((p) => ({ ...p, open: false, target: null }));
@@ -829,6 +834,7 @@ export default function PlanningPrototype() {
       confirmedOnlyArticle: false,
       expandedSections,
       selectedLineIds,
+      customSplitCount: current.analytics.includes('Своя') ? Math.max(1, (current.selectedValues['Своя'] ?? []).length) : 2,
     });
   };
 
@@ -883,12 +889,52 @@ export default function PlanningPrototype() {
     });
   };
 
+  const removeAnalyticFromBreakdowns = (analytic: AnalyticKey) => {
+    if (!selectedPlan) return;
+
+    const stripBreakdown = (b?: Breakdown): Breakdown | undefined => {
+      if (!b) return undefined;
+      if (!b.analytics.includes(analytic)) return b;
+      const analytics = b.analytics.filter((a) => a !== analytic);
+      if (!analytics.length) return undefined;
+      const selectedValues: Partial<Record<AnalyticKey, string[]>> = {};
+      for (const a of analytics) selectedValues[a] = b.selectedValues[a] ?? ANALYTIC_VALUES[a];
+      return { analytics, valuesMode: 'selected', selectedValues };
+    };
+
+    setPlanBreakdownByPlanId((prev) => {
+      const next = stripBreakdown(prev[selectedPlan.id]);
+      return { ...prev, [selectedPlan.id]: next ?? defaultBreakdown() };
+    });
+
+    updateGrid(selectedPlan.id, (cur) =>
+      cur.map((s) => {
+        const nextSectionBreakdown = stripBreakdown(s.breakdown);
+        return {
+          ...s,
+          breakdown: nextSectionBreakdown,
+          lines: s.lines.map((ln) => {
+            const own = stripBreakdown(ln.breakdown);
+            const effective = own ?? nextSectionBreakdown;
+            if (!effective) return { ...ln, breakdown: undefined, combos: [] };
+            return { ...ln, breakdown: own, combos: generateCombos(effective), isOpen: true };
+          }),
+        };
+      }),
+    );
+  };
+
   const buildBreakdownFromDialog = (): Breakdown => {
     const analytics = [...bdg.analytics];
     if (!analytics.length) return defaultBreakdown();
 
     const selectedValues: Partial<Record<AnalyticKey, string[]>> = {};
     for (const k of analytics) {
+      if (k === 'Своя') {
+        const amount = Math.max(1, Math.floor(bdg.customSplitCount || 1));
+        selectedValues[k] = Array.from({ length: amount }, (_, i) => `Значение ${i + 1}`);
+        continue;
+      }
       const map = bdg.selectedValues[k] ?? {};
       const picked = Object.entries(map)
         .filter(([, v]) => v)
@@ -995,6 +1041,39 @@ export default function PlanningPrototype() {
   const startEditComboCell = (sectionId: number, lineId: number, comboId: number, key: PeriodKey, current: string) => {
     setEditingCell({ sectionId, lineId, comboId, key });
     setEditingValue(current ?? '');
+  };
+
+  const startEditDimCell = (sectionId: number, lineId: number, comboId: number, analytic: AnalyticKey, current: string) => {
+    setEditingDimCell({ sectionId, lineId, comboId, analytic });
+    setEditingDimValue(current ?? '');
+  };
+
+  const commitEditingDimCell = () => {
+    if (!selectedPlan || !editingDimCell) return;
+    const value = editingDimValue.trim();
+    if (!value) return;
+    updateGrid(selectedPlan.id, (cur) =>
+      cur.map((s) => {
+        if (s.id !== editingDimCell.sectionId) return s;
+        return {
+          ...s,
+          lines: s.lines.map((ln) => {
+            if (ln.id !== editingDimCell.lineId) return ln;
+            return {
+              ...ln,
+              combos: ln.combos.map((c) => (c.id !== editingDimCell.comboId ? c : { ...c, dims: { ...c.dims, [editingDimCell.analytic]: value } })),
+            };
+          }),
+        };
+      }),
+    );
+    setEditingDimCell(null);
+    setEditingDimValue('');
+  };
+
+  const cancelEditingDimCell = () => {
+    setEditingDimCell(null);
+    setEditingDimValue('');
   };
 
   const commitEditingCell = () => {
@@ -1229,7 +1308,28 @@ export default function PlanningPrototype() {
 
                 {activeAnalyticColumns.map((a) => (
                   <td key={a} className="p-3 text-sm text-gray-700">
-                    {c.dims[a] ?? '—'}
+                    {editingDimCell && editingDimCell.sectionId === section.id && editingDimCell.lineId === ln.id && editingDimCell.comboId === c.id && editingDimCell.analytic === a ? (
+                      <input
+                        autoFocus
+                        value={editingDimValue}
+                        onChange={(e) => setEditingDimValue(e.target.value)}
+                        onBlur={commitEditingDimCell}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditingDimCell();
+                          if (e.key === 'Escape') cancelEditingDimCell();
+                        }}
+                        className="block w-full h-8 box-border appearance-none bg-transparent px-1 text-sm leading-8 border-0 m-0 outline-none focus:outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="w-full text-left h-8 px-1 rounded hover:bg-amber-50"
+                        onClick={() => startEditDimCell(section.id, ln.id, c.id, a, c.dims[a] ?? '')}
+                        title="Кликните, чтобы переименовать значение"
+                      >
+                        {c.dims[a] ?? '—'}
+                      </button>
+                    )}
                   </td>
                 ))}
 
@@ -1286,7 +1386,7 @@ export default function PlanningPrototype() {
 
   const selectedWizardAnalytic = bdg.analytics[0] as AnalyticKey | undefined;
   const canProceedBreakdownStep1 = bdg.analytics.length > 0;
-  const canProceedBreakdownStep2 = selectedWizardAnalytic ? Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean) : false;
+  const canProceedBreakdownStep2 = selectedWizardAnalytic ? (selectedWizardAnalytic === 'Своя' ? bdg.customSplitCount > 0 : Object.values(bdg.selectedValues[selectedWizardAnalytic] ?? {}).some(Boolean)) : false;
 
   const dialogGrid = selectedPlan ? (gridByPlanId[selectedPlan.id] ?? []) : [];
   const selectedLineIdsList = Object.entries(bdg.selectedLineIds).filter(([, v]) => v).map(([k]) => Number(k));
@@ -1517,21 +1617,10 @@ export default function PlanningPrototype() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-2xl font-semibold">{selectedPlan?.report ?? 'ПиУ'}</div>
-                    <div className="text-sm text-gray-500 mt-1">Выберите шаг и период, затем кликайте по ячейкам таблицы для ввода значений. Разрезы задаются через «Аналитики», а итоговые суммы пересчитываются автоматически.</div>
                   </div>
                   <Button type="button" className={ui.btnSecondary} onClick={() => setView('card')}>
                     ← Назад
                   </Button>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <div className="text-sm text-gray-500">План:</div>
-                  <Pill text={formatBreakdownLabel(planBreakdown)} onClick={() => openBreakdownPanel({ scope: 'План' })} title="Настроить аналитики (разрезы) плана" />
-                  {activeAnalyticColumns.map((tag) => (
-                    <span key={tag} className="h-7 px-2 inline-flex items-center rounded-full bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                      {tag}
-                    </span>
-                  ))}
                 </div>
 
                 <div className="mt-3 rounded-xl border p-3 bg-gray-50">
@@ -1654,8 +1743,25 @@ export default function PlanningPrototype() {
                       <tr className="border-b bg-gray-50">
                         <th className="p-2 text-left">Статья</th>
                         {activeAnalyticColumns.map((a) => (
-                          <th key={a} className="p-2 text-left">
-                            {a}
+                          <th
+                            key={a}
+                            className="p-2 text-left"
+                            onMouseEnter={() => setHoverAnalyticColumn(a)}
+                            onMouseLeave={() => setHoverAnalyticColumn((p) => (p === a ? null : p))}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span>{a}</span>
+                              {a === 'Проект' && hoverAnalyticColumn === a ? (
+                                <button
+                                  type="button"
+                                  className="text-xs text-red-600 hover:text-red-700"
+                                  onClick={() => removeAnalyticFromBreakdowns('Проект')}
+                                  title="Снять разбивку по проекту"
+                                >
+                                  ✕ убрать
+                                </button>
+                              ) : null}
+                            </div>
                           </th>
                         ))}
                         {periodColumns.map((p) => (
@@ -1859,40 +1965,55 @@ export default function PlanningPrototype() {
                         </div>
 
                         {selectedWizardAnalytic ? (
-                          <div className="border rounded-lg p-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-sm font-semibold text-gray-900">{selectedWizardAnalytic}</div>
-                              <div className="flex items-center gap-2 text-xs">
-                                <button
-                                  type="button"
-                                  className="text-gray-600 hover:text-gray-800"
-                                  onClick={() => {
-                                    for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, true);
-                                  }}
-                                >
-                                  Выбрать все
-                                </button>
-                                <span className="text-gray-300">|</span>
-                                <button
-                                  type="button"
-                                  className="text-gray-600 hover:text-gray-800"
-                                  onClick={() => {
-                                    for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, false);
-                                  }}
-                                >
-                                  Снять
-                                </button>
+                          selectedWizardAnalytic === 'Своя' ? (
+                            <div className="border rounded-lg p-3 space-y-2">
+                              <div className="text-sm font-semibold text-gray-900">Своя</div>
+                              <div className="text-xs text-gray-600">Укажите, на сколько строк разбить статью. Будут созданы «Значение 1», «Значение 2» и т.д., затем их можно переименовать в таблице.</div>
+                              <input
+                                type="number"
+                                min={1}
+                                max={50}
+                                value={bdg.customSplitCount}
+                                onChange={(e) => setBdg((p) => ({ ...p, customSplitCount: Math.max(1, Math.min(50, Number(e.target.value) || 1)) }))}
+                                className="w-full h-9 px-2 border rounded-md text-sm"
+                              />
+                            </div>
+                          ) : (
+                            <div className="border rounded-lg p-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-sm font-semibold text-gray-900">{selectedWizardAnalytic}</div>
+                                <div className="flex items-center gap-2 text-xs">
+                                  <button
+                                    type="button"
+                                    className="text-gray-600 hover:text-gray-800"
+                                    onClick={() => {
+                                      for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, true);
+                                    }}
+                                  >
+                                    Выбрать все
+                                  </button>
+                                  <span className="text-gray-300">|</span>
+                                  <button
+                                    type="button"
+                                    className="text-gray-600 hover:text-gray-800"
+                                    onClick={() => {
+                                      for (const v of ANALYTIC_VALUES[selectedWizardAnalytic]) setValueChecked(selectedWizardAnalytic, v, false);
+                                    }}
+                                  >
+                                    Снять
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="mt-2 max-h-72 overflow-auto space-y-2">
+                                {ANALYTIC_VALUES[selectedWizardAnalytic].map((v) => (
+                                  <label key={v} className="flex items-center gap-3 cursor-pointer">
+                                    <Checkbox checked={!!bdg.selectedValues[selectedWizardAnalytic]?.[v]} onCheckedChange={(c) => setValueChecked(selectedWizardAnalytic, v, !!c)} />
+                                    <span className="text-sm text-gray-800">{v}</span>
+                                  </label>
+                                ))}
                               </div>
                             </div>
-                            <div className="mt-2 max-h-72 overflow-auto space-y-2">
-                              {ANALYTIC_VALUES[selectedWizardAnalytic].map((v) => (
-                                <label key={v} className="flex items-center gap-3 cursor-pointer">
-                                  <Checkbox checked={!!bdg.selectedValues[selectedWizardAnalytic]?.[v]} onCheckedChange={(c) => setValueChecked(selectedWizardAnalytic, v, !!c)} />
-                                  <span className="text-sm text-gray-800">{v}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
+                          )
                         ) : null}
                       </div>
                     ) : null}
