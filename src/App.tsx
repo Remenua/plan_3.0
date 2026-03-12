@@ -81,6 +81,14 @@ const LIST_COLUMNS: ListColumn[] = [
   { key: 'barcode', label: 'Баркод' },
 ];
 
+const PLAN_PROJECT_PRESETS: Record<number, string[]> = {
+  1: ['Договор 123'],
+  2: ['ЖК Северный, очередь 1', 'ЖК Центральный, очередь 1', 'ЖК Южный, очередь 1'],
+  3: Array.from({ length: 20 }, (_, i) => `Проект демо ${i + 1}`),
+  4: ['ЖК Парковый, очередь 2', 'ЖК Речной, очередь 1'],
+  5: ['ЖК Лесной, очередь 3'],
+};
+
 type PeriodKey = string;
 type PeriodColumn = { key: PeriodKey; label: string };
 type TableStep = 'day' | 'week' | 'month';
@@ -547,6 +555,33 @@ export default function PlanningPrototype() {
       note: 'Собран на основе Q1 гипотез',
       attachmentName: 'marketing_budget.xlsx',
     },
+    {
+      id: 3,
+      name: 'План закупок',
+      author: CURRENT_USER,
+      approved: false,
+      createdAt: '2026-02-08',
+      report: 'ПиУ',
+      note: 'Сценарий по материалам на Q2',
+    },
+    {
+      id: 4,
+      name: 'План производства',
+      author: CURRENT_USER,
+      approved: true,
+      createdAt: '2026-02-06',
+      report: 'ПиУ',
+      note: 'Подтвержден после сверки с ЦФО',
+    },
+    {
+      id: 5,
+      name: 'План логистики',
+      author: CURRENT_USER,
+      approved: false,
+      createdAt: '2026-02-04',
+      report: 'ДДС',
+      note: 'Черновой вариант по маршрутам',
+    },
   ]);
 
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
@@ -645,7 +680,9 @@ export default function PlanningPrototype() {
       }
     }
 
-    return Array.from(set);
+    const values = Array.from(set);
+    if (!values.length && analytic === 'Проект') return PLAN_PROJECT_PRESETS[id] ?? [];
+    return values;
   };
 
   const summarizeValues = (values: string[]): string => {
@@ -1546,7 +1583,7 @@ export default function PlanningPrototype() {
     <div className={ui.page}>
       {view === 'list' ? (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <div className={ui.wrap}>
+          <div className="w-full px-6 md:px-10 py-8">
             <div className="flex items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-2xl font-semibold">Планы</h2>
@@ -1649,8 +1686,8 @@ export default function PlanningPrototype() {
               </div>
             </div>
 
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="min-w-full text-sm">
+            <div className="border rounded-lg inline-block min-w-full align-top">
+              <table className="text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50 text-left">
                     {visibleColumns.map((column) => (
