@@ -81,6 +81,8 @@ const LIST_COLUMNS: ListColumn[] = [
   { key: 'barcode', label: 'Баркод' },
 ];
 
+const DEFAULT_SELECTED_VALUES_LIMIT = 3;
+
 const PLAN_PROJECT_PRESETS: Record<number, string[]> = {
   1: ['Договор 123'],
   2: ['ЖК Северный, очередь 1', 'ЖК Центральный, очередь 1', 'ЖК Южный, очередь 1'],
@@ -1018,7 +1020,7 @@ export default function PlanningPrototype() {
       const selectedValues = { ...prev.selectedValues };
       if (prev.activeAnalytic !== 'Своя' && !selectedValues[prev.activeAnalytic]) {
         const m: Record<string, boolean> = {};
-        for (const v of ANALYTIC_VALUES[prev.activeAnalytic]) m[v] = true;
+        for (const [idx, v] of ANALYTIC_VALUES[prev.activeAnalytic].entries()) m[v] = idx < DEFAULT_SELECTED_VALUES_LIMIT;
         selectedValues[prev.activeAnalytic] = m;
       }
 
@@ -1151,11 +1153,23 @@ export default function PlanningPrototype() {
     const selectedLineIds = new Set<number>(Object.entries(bdg.selectedLineIds).filter(([, v]) => v).map(([k]) => Number(k)));
     if (selectedLineIds.size === 0) return;
 
+    setPlanBreakdownByPlanId((prev) =>
+      bdg.target?.scope === 'План'
+        ? { ...prev, [selectedPlan.id]: nb }
+        : prev,
+    );
+
     updateGrid(selectedPlan.id, (cur) =>
-      cur.map((s) => ({
-        ...s,
-        lines: s.lines.map((ln) => (selectedLineIds.has(ln.id) ? applyToLine(ln, nb) : ln)),
-      })),
+      cur.map((s) => {
+        const isTargetSection = bdg.target?.scope === 'Раздел' && s.id === bdg.target.sectionId;
+        const sectionBreakdown = isTargetSection ? nb : s.breakdown;
+
+        return {
+          ...s,
+          breakdown: sectionBreakdown,
+          lines: s.lines.map((ln) => (selectedLineIds.has(ln.id) ? applyToLine(ln, nb) : ln)),
+        };
+      }),
     );
 
     closeBreakdownPanel();
