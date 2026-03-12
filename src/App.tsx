@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CalendarDays, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { CalendarDays, ChevronDown, Plus, Settings2, Trash2, X } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -27,6 +27,13 @@ type Plan = {
   report: ReportType;
   note: string;
   attachmentName?: string;
+};
+
+type ListColumnKey = 'name' | 'author' | 'report' | 'status' | 'project' | 'organization' | 'cfo' | 'nomenclature' | 'counterparty' | 'article' | 'barcode';
+
+type ListColumn = {
+  key: ListColumnKey;
+  label: string;
 };
 
 type View = 'list' | 'card' | 'values';
@@ -59,6 +66,28 @@ const ui = {
   bottomBar: 'fixed bottom-0 left-0 right-0 bg-white border-t',
   bottomInner: 'max-w-[860px] mx-auto px-6 md:px-10 py-5 flex items-center justify-between',
 } as const;
+
+const LIST_COLUMNS: ListColumn[] = [
+  { key: 'name', label: 'Название плана' },
+  { key: 'author', label: 'Автор' },
+  { key: 'report', label: 'Отчет' },
+  { key: 'status', label: 'Статус' },
+  { key: 'project', label: 'Проект' },
+  { key: 'organization', label: 'Организация' },
+  { key: 'cfo', label: 'ЦФО' },
+  { key: 'nomenclature', label: 'Номенклатура' },
+  { key: 'counterparty', label: 'Контрагент' },
+  { key: 'article', label: 'Артикул' },
+  { key: 'barcode', label: 'Баркод' },
+];
+
+const PLAN_PROJECT_PRESETS: Record<number, string[]> = {
+  1: ['Договор 123'],
+  2: ['ЖК Северный, очередь 1', 'ЖК Центральный, очередь 1', 'ЖК Южный, очередь 1'],
+  3: Array.from({ length: 20 }, (_, i) => `Проект демо ${i + 1}`),
+  4: ['ЖК Парковый, очередь 2', 'ЖК Речной, очередь 1'],
+  5: ['ЖК Лесной, очередь 3'],
+};
 
 type PeriodKey = string;
 type PeriodColumn = { key: PeriodKey; label: string };
@@ -526,6 +555,33 @@ export default function PlanningPrototype() {
       note: 'Собран на основе Q1 гипотез',
       attachmentName: 'marketing_budget.xlsx',
     },
+    {
+      id: 3,
+      name: 'План закупок',
+      author: CURRENT_USER,
+      approved: false,
+      createdAt: '2026-02-08',
+      report: 'ПиУ',
+      note: 'Сценарий по материалам на Q2',
+    },
+    {
+      id: 4,
+      name: 'План производства',
+      author: CURRENT_USER,
+      approved: true,
+      createdAt: '2026-02-06',
+      report: 'ПиУ',
+      note: 'Подтвержден после сверки с ЦФО',
+    },
+    {
+      id: 5,
+      name: 'План логистики',
+      author: CURRENT_USER,
+      approved: false,
+      createdAt: '2026-02-04',
+      report: 'ДДС',
+      note: 'Черновой вариант по маршрутам',
+    },
   ]);
 
   const [selectedPlanId, setSelectedPlanId] = useState<number | null>(null);
@@ -587,6 +643,115 @@ export default function PlanningPrototype() {
   const closeCard = () => {
     setView('list');
     setLinkInput('');
+  };
+
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState<ListColumnKey[]>(['name', 'author', 'status', 'report']);
+  const [isColumnsOpen, setIsColumnsOpen] = useState<boolean>(false);
+  const [isAddFilterOpen, setIsAddFilterOpen] = useState<boolean>(false);
+  const [globalListSearch, setGlobalListSearch] = useState<string>('');
+  const [activeFilterColumns, setActiveFilterColumns] = useState<ListColumnKey[]>([]);
+  const [columnFilters, setColumnFilters] = useState<Partial<Record<ListColumnKey, string>>>({});
+
+  const collectValuesFromBreakdown = (b: Breakdown | undefined, analytic: AnalyticKey): string[] => {
+    if (!b || !b.analytics.includes(analytic)) return [];
+    if (b.valuesMode === 'all') return ['Все'];
+    return b.selectedValues[analytic] ?? [];
+  };
+
+  const extractPlanAnalyticValues = (id: number, analytic: AnalyticKey): string[] => {
+    const set = new Set<string>();
+    const push = (v: string) => {
+      const trimmed = v.trim();
+      if (trimmed) set.add(trimmed);
+    };
+
+    const planBreakdownLocal = planBreakdownByPlanId[id];
+    for (const value of collectValuesFromBreakdown(planBreakdownLocal, analytic)) push(value);
+
+    const grid = gridByPlanId[id] ?? [];
+    for (const section of grid) {
+      for (const value of collectValuesFromBreakdown(section.breakdown, analytic)) push(value);
+      for (const line of section.lines) {
+        for (const value of collectValuesFromBreakdown(line.breakdown, analytic)) push(value);
+        for (const combo of line.combos) {
+          const dimValue = combo.dims[analytic];
+          if (dimValue) push(dimValue);
+        }
+      }
+    }
+
+    const values = Array.from(set);
+    if (!values.length && analytic === 'Проект') return PLAN_PROJECT_PRESETS[id] ?? [];
+    return values;
+  };
+
+  const summarizeValues = (values: string[]): string => {
+    if (!values.length) return '—';
+    if (values.includes('Все')) return 'Все';
+    if (values.length <= 2) return values.join(', ');
+    return `${values.slice(0, 2).join(', ')} +${values.length - 2}`;
+  };
+
+  const cellValueByColumn = (plan: Plan, key: ListColumnKey): string => {
+    if (key === 'name') return plan.name;
+    if (key === 'author') return plan.author;
+    if (key === 'report') return plan.report;
+    if (key === 'status') return statusLabel(plan.approved);
+    if (key === 'project') return summarizeValues(extractPlanAnalyticValues(plan.id, 'Проект'));
+    if (key === 'organization') return summarizeValues(extractPlanAnalyticValues(plan.id, 'Организация'));
+    if (key === 'cfo') return summarizeValues(extractPlanAnalyticValues(plan.id, 'ЦФО'));
+    if (key === 'nomenclature') return summarizeValues(extractPlanAnalyticValues(plan.id, 'Номенклатура'));
+    if (key === 'counterparty') return summarizeValues(extractPlanAnalyticValues(plan.id, 'Контрагент'));
+
+    const nomenclatureValues = extractPlanAnalyticValues(plan.id, 'Номенклатура');
+    const codeSource = nomenclatureValues.find((v) => v.includes('№')) ?? `${plan.id}`;
+    const code = codeSource.includes('№') ? codeSource.split('№')[1] : `${plan.id}`;
+    if (key === 'article') return code ? `ART-${code}` : '—';
+    if (key === 'barcode') return code ? `46000000${code.toString().replace(/\D/g, '').padStart(5, '0').slice(0, 5)}` : '—';
+    return '—';
+  };
+
+  const visibleColumns = LIST_COLUMNS.filter((col) => visibleColumnKeys.includes(col.key));
+  const addableFilterColumns = visibleColumns.filter((col) => !activeFilterColumns.includes(col.key));
+
+  const filteredPlans = useMemo(() => {
+    const search = globalListSearch.trim().toLowerCase();
+    return plans.filter((plan) => {
+      const rowValues = LIST_COLUMNS.map((col) => cellValueByColumn(plan, col.key).toLowerCase());
+      if (search && !rowValues.some((v) => v.includes(search))) return false;
+
+      for (const col of activeFilterColumns) {
+        const query = (columnFilters[col] ?? '').trim().toLowerCase();
+        if (!query) continue;
+        const value = cellValueByColumn(plan, col).toLowerCase();
+        if (!value.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [plans, globalListSearch, activeFilterColumns, columnFilters, visibleColumnKeys, gridByPlanId, planBreakdownByPlanId]);
+
+  const toggleColumnVisibility = (key: ListColumnKey, checked: boolean) => {
+    setVisibleColumnKeys((prev) => {
+      if (checked && !prev.includes(key)) return [...prev, key];
+      if (!checked) {
+        const next = prev.filter((k) => k !== key);
+        if (!next.length) return prev;
+        setActiveFilterColumns((prevFilters) => prevFilters.filter((k) => k !== key));
+        return next;
+      }
+      return prev;
+    });
+  };
+
+  const addFilterByColumn = (key: ListColumnKey) => {
+    setActiveFilterColumns((prev) => (prev.includes(key) ? prev : [...prev, key]));
+    setIsAddFilterOpen(false);
+  };
+
+  const clearAllFilters = () => {
+    setGlobalListSearch('');
+    setActiveFilterColumns([]);
+    setColumnFilters({});
   };
 
   const applyQuickPreset = (step: TableStep, preset: QuickPeriodPreset) => {
@@ -1418,30 +1583,141 @@ export default function PlanningPrototype() {
     <div className={ui.page}>
       {view === 'list' ? (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-          <div className={ui.wrap}>
+          <div className="w-full px-6 md:px-10 py-8">
             <div className="flex items-center justify-between gap-3 mb-6">
               <div>
                 <h2 className="text-2xl font-semibold">Планы</h2>
                 <p className={ui.hint}>Двойной клик по строке — открыть план</p>
               </div>
-              <Button className={ui.btnPrimary} onClick={addPlan}>
-                + Добавить план
-              </Button>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Button className={ui.btnSecondary} onClick={() => setIsColumnsOpen((v) => !v)}>
+                    <Settings2 className="w-4 h-4 mr-2" />
+                    Колонки
+                  </Button>
+                  {isColumnsOpen ? (
+                    <div className="absolute right-0 mt-2 w-64 rounded-lg border bg-white shadow-lg p-3 z-20">
+                      <div className="text-xs uppercase tracking-wide text-gray-500 mb-2">Добавить поля</div>
+                      <div className="space-y-2 max-h-72 overflow-auto">
+                        {LIST_COLUMNS.map((column) => {
+                          const checked = visibleColumnKeys.includes(column.key);
+                          return (
+                            <label key={column.key} className="flex items-center gap-2 text-sm text-gray-700">
+                              <Checkbox checked={checked} onCheckedChange={(v) => toggleColumnVisibility(column.key, !!v)} />
+                              <span>{column.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+                <Button className={ui.btnPrimary} onClick={addPlan}>
+                  + Добавить план
+                </Button>
+              </div>
             </div>
 
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="min-w-full text-sm">
+            <div className="mb-3 rounded-lg border p-3 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="text-sm font-semibold text-gray-900">Поиск:</div>
+                <Input
+                  value={globalListSearch}
+                  onChange={(e) => setGlobalListSearch(e.target.value)}
+                  placeholder="Введите значение"
+                  className="h-9"
+                />
+                <button type="button" className="text-gray-400 hover:text-gray-700" onClick={() => setGlobalListSearch('')}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {activeFilterColumns.map((colKey) => {
+                  const label = LIST_COLUMNS.find((c) => c.key === colKey)?.label ?? colKey;
+                  return (
+                    <span key={colKey} className="inline-flex items-center gap-2 h-8 px-3 rounded-md bg-amber-100 border border-amber-300 text-sm text-gray-800">
+                      {label}: {columnFilters[colKey] || '...'}
+                      <button
+                        type="button"
+                        className="text-gray-600 hover:text-gray-900"
+                        onClick={() => {
+                          setActiveFilterColumns((prev) => prev.filter((k) => k !== colKey));
+                          setColumnFilters((prev) => {
+                            const next = { ...prev };
+                            delete next[colKey];
+                            return next;
+                          });
+                        }}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+
+                <div className="relative">
+                  <Button className={ui.btnPrimary} onClick={() => setIsAddFilterOpen((v) => !v)}>
+                    + Фильтры
+                  </Button>
+                  {isAddFilterOpen ? (
+                    <div className="absolute right-0 mt-2 w-56 rounded-lg border bg-white shadow-lg p-2 z-20">
+                      {addableFilterColumns.length ? (
+                        addableFilterColumns.map((col) => (
+                          <button
+                            key={col.key}
+                            type="button"
+                            className="block w-full text-left text-sm px-2 py-1 rounded hover:bg-gray-50"
+                            onClick={() => addFilterByColumn(col.key)}
+                          >
+                            {col.label}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="text-xs text-gray-500 p-1">Все фильтры добавлены</div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+
+                <button type="button" className="text-xs text-blue-600 hover:text-blue-800" onClick={clearAllFilters}>
+                  Сбросить фильтры
+                </button>
+              </div>
+            </div>
+
+            <div className="border rounded-lg inline-block min-w-full align-top">
+              <table className="text-sm">
                 <thead>
                   <tr className="border-b bg-gray-50 text-left">
-                    <th className="p-3">Название плана</th>
-                    <th className="p-3">Автор</th>
-                    <th className="p-3">Статус</th>
-                    <th className="p-3">Дата создания</th>
-                    <th className="p-3">Отчет</th>
+                    {visibleColumns.map((column) => (
+                      <th key={column.key} className="p-3 min-w-[160px]">{column.label}</th>
+                    ))}
+                    <th className="p-3 min-w-[130px]">Дата создания</th>
+                  </tr>
+                  <tr className="border-b bg-white text-left">
+                    {visibleColumns.map((column) => {
+                      const active = activeFilterColumns.includes(column.key);
+                      return (
+                        <th key={column.key} className="p-2">
+                          {active ? (
+                            <Input
+                              value={columnFilters[column.key] ?? ''}
+                              onChange={(e) => setColumnFilters((prev) => ({ ...prev, [column.key]: e.target.value }))}
+                              placeholder={`Фильтр: ${column.label}`}
+                              className="h-8"
+                            />
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </th>
+                      );
+                    })}
+                    <th className="p-2"><span className="text-xs text-gray-300">—</span></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {plans.map((plan) => {
+                  {filteredPlans.map((plan) => {
                     const isSelected = plan.id === selectedPlanId;
                     return (
                       <tr
@@ -1450,18 +1726,27 @@ export default function PlanningPrototype() {
                         onClick={() => openFromList(plan.id)}
                         onDoubleClick={() => openCard(plan.id)}
                       >
-                        <td className="p-2 font-medium">
-                          <span className="truncate max-w-[360px] inline-block">{plan.name}</span>
-                        </td>
-                        <td className="p-3">{plan.author}</td>
-                        <td className="p-3">
-                          <span className={`text-xs ${plan.approved ? 'text-emerald-700' : 'text-gray-600'}`}>{statusLabel(plan.approved)}</span>
-                        </td>
+                        {visibleColumns.map((column) => {
+                          const cellValue = cellValueByColumn(plan, column.key);
+                          const isName = column.key === 'name';
+                          const isStatus = column.key === 'status';
+                          return (
+                            <td key={column.key} className={`p-3 ${isName ? 'font-medium' : ''}`}>
+                              {isStatus ? <span className={`text-xs ${plan.approved ? 'text-emerald-700' : 'text-gray-600'}`}>{cellValue}</span> : cellValue}
+                            </td>
+                          );
+                        })}
                         <td className="p-3">{formatDateISOToRU(plan.createdAt)}</td>
-                        <td className="p-3">{plan.report}</td>
                       </tr>
                     );
                   })}
+                  {filteredPlans.length === 0 ? (
+                    <tr>
+                      <td className="p-4 text-sm text-gray-500" colSpan={visibleColumns.length + 1}>
+                        Нет планов, удовлетворяющих условиям фильтра.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>
